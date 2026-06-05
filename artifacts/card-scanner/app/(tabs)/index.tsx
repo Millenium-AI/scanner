@@ -269,7 +269,7 @@ function NativeScannerScreen() {
 
       {/* Dim overlay */}
       <View style={styles.dimOverlay} pointerEvents="none">
-        <View style={[styles.dimTop, { height: insets.top + 80 }]} />
+        <View style={styles.dimTop} />
         <View style={styles.dimMiddle}>
           <View style={styles.dimSide} />
           <View style={styles.frameWindow} />
@@ -382,8 +382,8 @@ const styles = StyleSheet.create({
 
   // Native
   dimOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: "column" },
-  dimTop: { backgroundColor: "rgba(0,0,0,0.55)" },
-  dimMiddle: { flexDirection: "row", height: FRAME_H + 20 },
+  dimTop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)" },
+  dimMiddle: { flexDirection: "row", height: FRAME_H },
   dimSide: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)" },
   frameWindow: { width: FRAME_W, backgroundColor: "transparent" },
   dimBottom: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)" },
