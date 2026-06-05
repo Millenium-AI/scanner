@@ -303,7 +303,7 @@ function NativeScannerScreen() {
       </View>
 
       {/* Bottom controls */}
-      <View style={[styles.nativeBottom, { paddingBottom: insets.bottom + 32 }]}>
+      <View style={[styles.nativeBottom, { paddingBottom: insets.bottom + 90 }]}>
         {/* Upload option */}
         <Pressable style={styles.nativeUpload} onPress={handleUpload} disabled={scanState === "scanning"}>
           <Ionicons name="image-outline" size={22} color="rgba(255,255,255,0.7)" />
@@ -344,8 +344,8 @@ export default function ScannerScreen() {
   return <NativeScannerScreen />;
 }
 
-const FRAME_W = 280;
-const FRAME_H = 196;
+const FRAME_W = 220;
+const FRAME_H = 308;
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -360,7 +360,7 @@ const styles = StyleSheet.create({
 
   scanArea: { flex: 1, alignItems: "center", justifyContent: "center" },
   cardFrame: {
-    width: FRAME_W, height: FRAME_H + 40,
+    width: FRAME_W, height: FRAME_H,
     borderRadius: 16, borderWidth: 1,
     alignItems: "center", justifyContent: "center", gap: 14,
     position: "relative",
@@ -383,7 +383,7 @@ const styles = StyleSheet.create({
   // Native
   dimOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: "column" },
   dimTop: { backgroundColor: "rgba(0,0,0,0.55)" },
-  dimMiddle: { flexDirection: "row", height: FRAME_H },
+  dimMiddle: { flexDirection: "row", height: FRAME_H + 20 },
   dimSide: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)" },
   frameWindow: { width: FRAME_W, backgroundColor: "transparent" },
   dimBottom: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)" },
