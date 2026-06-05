@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -14,23 +13,38 @@ interface CardListItemProps {
   onLongPress?: () => void;
 }
 
-const GAME_ICONS: Record<string, string> = {
-  pokemon: "⚡",
-  "magic: the gathering": "🔮",
-  "yu-gi-oh!": "⭐",
-  sports: "🏆",
+const GAME_COLORS: Record<string, string> = {
+  "pokemon": "#FBBF24",
+  "magic: the gathering": "#DC2626",
+  "yu-gi-oh!": "#8B5CF6",
+  "sports": "#3B82F6",
 };
+
+function getGameColor(game: string): string {
+  return GAME_COLORS[game.toLowerCase()] ?? "#1A56DB";
+}
+
+const GAME_LABELS: Record<string, string> = {
+  "pokemon": "PKM",
+  "magic: the gathering": "MTG",
+  "yu-gi-oh!": "YGO",
+  "sports": "SPT",
+};
+
+function getGameLabel(game: string): string {
+  return GAME_LABELS[game.toLowerCase()] ?? game.slice(0, 3).toUpperCase();
+}
 
 export function CardListItem({ card, subtitle, rightContent, onPress, onLongPress }: CardListItemProps) {
   const colors = useColors();
-
-  const gameIcon = GAME_ICONS[card.game.toLowerCase()] ?? "🃏";
+  const gc = getGameColor(card.game);
+  const gl = getGameLabel(card.game);
 
   return (
     <Pressable
       style={({ pressed }) => [
         styles.container,
-        { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.75 : 1 }
+        { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.75 : 1 },
       ]}
       onPress={onPress}
       onLongPress={() => {
@@ -38,29 +52,22 @@ export function CardListItem({ card, subtitle, rightContent, onPress, onLongPres
         onLongPress?.();
       }}
     >
-      <View style={[styles.iconContainer, { backgroundColor: colors.secondary }]}>
-        <Text style={styles.gameIcon}>{gameIcon}</Text>
+      {/* Game tag */}
+      <View style={[styles.gameTag, { backgroundColor: gc + "20" }]}>
+        <Text style={[styles.gameTagText, { color: gc }]}>{gl}</Text>
       </View>
 
       <View style={styles.info}>
-        <Text style={[styles.name, { color: colors.foreground }]} numberOfLines={1}>
-          {card.name}
-        </Text>
-        <Text style={[styles.meta, { color: colors.mutedForeground }]} numberOfLines={1}>
+        <Text style={[styles.name, { color: colors.foreground }]} numberOfLines={1}>{card.name}</Text>
+        <Text style={[styles.sub, { color: colors.mutedForeground }]} numberOfLines={1}>
           {subtitle ?? `${card.game} · ${card.set}`}
         </Text>
       </View>
 
       {rightContent ?? (
         card.marketValue !== undefined ? (
-          <View style={styles.valueContainer}>
-            <Text style={[styles.value, { color: colors.primary }]}>
-              ${card.marketValue.toFixed(2)}
-            </Text>
-          </View>
-        ) : (
-          <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
-        )
+          <Text style={[styles.value, { color: colors.accent }]}>${card.marketValue.toFixed(2)}</Text>
+        ) : null
       )}
     </Pressable>
   );
@@ -76,33 +83,20 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 8,
   },
-  iconContainer: {
+  gameTag: {
     width: 44,
     height: 44,
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
   },
-  gameIcon: {
-    fontSize: 20,
+  gameTagText: {
+    fontSize: 11,
+    fontFamily: "Poppins_700Bold",
+    letterSpacing: 0.5,
   },
-  info: {
-    flex: 1,
-    gap: 2,
-  },
-  name: {
-    fontSize: 15,
-    fontFamily: "Inter_600SemiBold",
-  },
-  meta: {
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-  },
-  valueContainer: {
-    alignItems: "flex-end",
-  },
-  value: {
-    fontSize: 15,
-    fontFamily: "Inter_700Bold",
-  },
+  info: { flex: 1, gap: 2 },
+  name: { fontSize: 15, fontFamily: "Poppins_600SemiBold" },
+  sub: { fontSize: 12, fontFamily: "Poppins_400Regular" },
+  value: { fontSize: 15, fontFamily: "Poppins_700Bold" },
 });

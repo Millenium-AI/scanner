@@ -1,16 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React from "react";
-import {
-  Animated,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CardScanResult, useScanContext } from "@/context/ScanContext";
@@ -24,17 +15,17 @@ interface CardResultSheetProps {
 }
 
 const GAME_COLORS: Record<string, string> = {
-  pokemon: "#FFCB05",
-  "magic: the gathering": "#A62D2D",
+  "pokemon": "#FBBF24",
+  "magic: the gathering": "#DC2626",
   "yu-gi-oh!": "#8B5CF6",
-  sports: "#3B82F6",
+  "sports": "#3B82F6",
 };
 
-function getGameColor(game: string): string {
-  return GAME_COLORS[game.toLowerCase()] ?? "#00C4CC";
+function gameColor(game: string): string {
+  return GAME_COLORS[game.toLowerCase()] ?? "#1A56DB";
 }
 
-function formatValue(val?: number): string {
+function fmt(val?: number): string {
   if (val === undefined || val === null) return "—";
   return `$${val.toFixed(2)}`;
 }
@@ -46,122 +37,101 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
 
   if (!result) return null;
 
-  const gameColor = getGameColor(result.game);
-  const confidencePct = Math.round(result.confidence * 100);
+  const gc = gameColor(result.game);
+  const confPct = Math.round(result.confidence * 100);
+  const activeList = lists.find((l) => l.id === activeScanListId);
 
-  const handleSaveToScans = () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    addScan(result);
-    onClose();
-  };
-
-  const handleAddToCollection = () => {
+  const handleCollection = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     addToCollection(result);
     addScan(result);
     onClose();
   };
 
-  const activeList = lists.find((l) => l.id === activeScanListId);
+  const handleSave = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    addScan(result);
+    onClose();
+  };
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.overlay} onPress={onClose}>
-        <View style={[styles.sheet, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
+        <View style={[styles.sheet, { backgroundColor: colors.card, paddingBottom: insets.bottom + 20 }]}>
           <Pressable onPress={() => {}}>
             <View style={[styles.handle, { backgroundColor: colors.border }]} />
 
             <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
-              <View style={styles.header}>
-                <View style={[styles.gameBadge, { backgroundColor: gameColor + "20" }]}>
-                  <Text style={[styles.gameBadgeText, { color: gameColor }]}>
-                    {result.game.toUpperCase()}
-                  </Text>
+              {/* Game + confidence badges */}
+              <View style={styles.badges}>
+                <View style={[styles.gameBadge, { backgroundColor: gc + "20", borderColor: gc + "50", borderWidth: 1 }]}>
+                  <Text style={[styles.gameBadgeText, { color: gc }]}>{result.game.toUpperCase()}</Text>
                 </View>
-                <View style={[styles.confidenceBadge, {
-                  backgroundColor: confidencePct >= 80 ? colors.success + "20" : colors.warning + "20"
-                }]}>
-                  <Text style={[styles.confidenceText, {
-                    color: confidencePct >= 80 ? colors.success : colors.warning
-                  }]}>
-                    {confidencePct}% match
+                <View style={[
+                  styles.confBadge,
+                  { backgroundColor: confPct >= 80 ? colors.success + "20" : colors.warning + "20",
+                    borderColor: (confPct >= 80 ? colors.success : colors.warning) + "50",
+                    borderWidth: 1 }
+                ]}>
+                  <Text style={[styles.confText, { color: confPct >= 80 ? colors.success : colors.warning }]}>
+                    {confPct}% match
                   </Text>
                 </View>
               </View>
 
               <Text style={[styles.cardName, { color: colors.foreground }]}>{result.name}</Text>
-              <Text style={[styles.setName, { color: colors.mutedForeground }]}>
+              <Text style={[styles.setLine, { color: colors.mutedForeground }]}>
                 {result.set}{result.number ? ` · #${result.number}` : ""}
                 {result.rarity ? ` · ${result.rarity}` : ""}
               </Text>
 
+              {/* Value card */}
               {result.marketValue !== undefined && (
-                <View style={[styles.valueCard, { backgroundColor: colors.accent }]}>
+                <View style={[styles.valueCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}>
                   <View style={styles.valueRow}>
-                    <View style={styles.valueItem}>
-                      <Text style={[styles.valueLabel, { color: colors.mutedForeground }]}>Low</Text>
-                      <Text style={[styles.valueAmount, { color: colors.foreground }]}>
-                        {formatValue(result.lowValue)}
-                      </Text>
-                    </View>
-                    <View style={[styles.valueDivider, { backgroundColor: colors.border }]} />
-                    <View style={styles.valueItem}>
-                      <Text style={[styles.valueLabel, { color: colors.mutedForeground }]}>Market</Text>
-                      <Text style={[styles.valueAmountMain, { color: colors.primary }]}>
-                        {formatValue(result.marketValue)}
-                      </Text>
-                    </View>
-                    <View style={[styles.valueDivider, { backgroundColor: colors.border }]} />
-                    <View style={styles.valueItem}>
-                      <Text style={[styles.valueLabel, { color: colors.mutedForeground }]}>High</Text>
-                      <Text style={[styles.valueAmount, { color: colors.foreground }]}>
-                        {formatValue(result.highValue)}
-                      </Text>
-                    </View>
+                    {[
+                      { label: "Low", val: result.lowValue, main: false },
+                      { label: "Market", val: result.marketValue, main: true },
+                      { label: "High", val: result.highValue, main: false },
+                    ].map((v, i) => (
+                      <React.Fragment key={v.label}>
+                        {i > 0 && <View style={[styles.vDivider, { backgroundColor: colors.border }]} />}
+                        <View style={styles.valItem}>
+                          <Text style={[styles.valLabel, { color: colors.mutedForeground }]}>{v.label}</Text>
+                          <Text style={[v.main ? styles.valMain : styles.valAmt,
+                            { color: v.main ? colors.accent : colors.foreground }]}>
+                            {fmt(v.val)}
+                          </Text>
+                        </View>
+                      </React.Fragment>
+                    ))}
                   </View>
                 </View>
               )}
 
               {result.condition && (
                 <Text style={[styles.condition, { color: colors.mutedForeground }]}>
-                  Condition: <Text style={{ color: colors.foreground }}>{result.condition}</Text>
+                  Condition: <Text style={{ color: colors.foreground, fontFamily: "Poppins_600SemiBold" }}>{result.condition}</Text>
                 </Text>
               )}
 
+              {/* Actions */}
               <View style={styles.actions}>
-                <Pressable
-                  style={[styles.actionBtn, styles.primaryBtn, { backgroundColor: colors.primary }]}
-                  onPress={handleAddToCollection}
-                >
-                  <Ionicons name="albums" size={18} color={colors.primaryForeground} />
-                  <Text style={[styles.actionBtnText, { color: colors.primaryForeground }]}>
-                    Add to Collection
-                  </Text>
+                <Pressable style={[styles.btn, styles.btnPrimary, { backgroundColor: colors.accent }]} onPress={handleCollection}>
+                  <Ionicons name="albums" size={18} color={colors.background} />
+                  <Text style={[styles.btnText, { color: colors.background }]}>Add to Collection</Text>
                 </Pressable>
 
-                <Pressable
-                  style={[styles.actionBtn, styles.secondaryBtn, { backgroundColor: colors.secondary, borderColor: colors.border }]}
-                  onPress={handleSaveToScans}
-                >
+                <Pressable style={[styles.btn, styles.btnSecondary, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleSave}>
                   <Ionicons name="bookmark-outline" size={18} color={colors.foreground} />
-                  <Text style={[styles.actionBtnText, { color: colors.foreground }]}>
+                  <Text style={[styles.btnText, { color: colors.foreground }]}>
                     Save to {activeList?.name ?? "Scans"}
                   </Text>
                 </Pressable>
 
-                <Pressable
-                  style={[styles.actionBtn, styles.outlineBtn, { borderColor: colors.border }]}
-                  onPress={onScanAgain}
-                >
+                <Pressable style={[styles.btn, styles.btnGhost, { borderColor: colors.border }]} onPress={onScanAgain}>
                   <Ionicons name="scan" size={18} color={colors.mutedForeground} />
-                  <Text style={[styles.actionBtnText, { color: colors.mutedForeground }]}>
-                    Scan Again
-                  </Text>
+                  <Text style={[styles.btnText, { color: colors.mutedForeground }]}>Scan Again</Text>
                 </Pressable>
               </View>
             </ScrollView>
@@ -173,120 +143,33 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    justifyContent: "flex-end",
-  },
-  sheet: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingTop: 12,
-    paddingHorizontal: 20,
-    maxHeight: "80%",
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    alignSelf: "center",
-    marginBottom: 20,
-  },
-  header: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 12,
-    flexWrap: "wrap",
-  },
-  gameBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  gameBadgeText: {
-    fontSize: 11,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: 0.5,
-  },
-  confidenceBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  confidenceText: {
-    fontSize: 11,
-    fontFamily: "Inter_600SemiBold",
-  },
-  cardName: {
-    fontSize: 24,
-    fontFamily: "Inter_700Bold",
-    marginBottom: 4,
-  },
-  setName: {
-    fontSize: 14,
-    fontFamily: "Inter_400Regular",
-    marginBottom: 20,
-  },
-  valueCard: {
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-  },
-  valueRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  valueItem: {
-    flex: 1,
-    alignItems: "center",
-    gap: 4,
-  },
-  valueDivider: {
-    width: 1,
-    height: 36,
-  },
-  valueLabel: {
-    fontSize: 12,
-    fontFamily: "Inter_500Medium",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  valueAmount: {
-    fontSize: 16,
-    fontFamily: "Inter_600SemiBold",
-  },
-  valueAmountMain: {
-    fontSize: 22,
-    fontFamily: "Inter_700Bold",
-  },
-  condition: {
-    fontSize: 14,
-    fontFamily: "Inter_400Regular",
-    marginBottom: 20,
-  },
-  actions: {
-    gap: 10,
-    marginTop: 8,
-  },
-  actionBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 14,
-    borderRadius: 14,
-    gap: 8,
-  },
-  primaryBtn: {},
-  secondaryBtn: {
-    borderWidth: 1,
-  },
-  outlineBtn: {
-    borderWidth: 1,
-  },
-  actionBtnText: {
-    fontSize: 15,
-    fontFamily: "Inter_600SemiBold",
-  },
-  success: {},
-  warning: {},
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "flex-end" },
+  sheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingTop: 12, paddingHorizontal: 20, maxHeight: "82%" },
+  handle: { width: 36, height: 4, borderRadius: 2, alignSelf: "center", marginBottom: 22 },
+
+  badges: { flexDirection: "row", gap: 8, marginBottom: 14, flexWrap: "wrap" },
+  gameBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  gameBadgeText: { fontSize: 11, fontFamily: "Poppins_700Bold", letterSpacing: 0.5 },
+  confBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  confText: { fontSize: 11, fontFamily: "Poppins_600SemiBold" },
+
+  cardName: { fontSize: 24, fontFamily: "Poppins_700Bold", marginBottom: 4 },
+  setLine: { fontSize: 13, fontFamily: "Poppins_400Regular", marginBottom: 20 },
+
+  valueCard: { borderRadius: 16, padding: 16, marginBottom: 16 },
+  valueRow: { flexDirection: "row", alignItems: "center" },
+  valItem: { flex: 1, alignItems: "center", gap: 4 },
+  vDivider: { width: 1, height: 40 },
+  valLabel: { fontSize: 11, fontFamily: "Poppins_500Medium", textTransform: "uppercase", letterSpacing: 0.5 },
+  valAmt: { fontSize: 16, fontFamily: "Poppins_600SemiBold" },
+  valMain: { fontSize: 24, fontFamily: "Poppins_700Bold" },
+
+  condition: { fontSize: 13, fontFamily: "Poppins_400Regular", marginBottom: 20 },
+
+  actions: { gap: 10, marginTop: 4 },
+  btn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 15, borderRadius: 14, gap: 8 },
+  btnPrimary: {},
+  btnSecondary: { borderWidth: 1 },
+  btnGhost: { borderWidth: 1 },
+  btnText: { fontSize: 15, fontFamily: "Poppins_600SemiBold" },
 });
