@@ -174,6 +174,14 @@ function NativeScannerScreen() {
   const [permission, requestPermission] = useCameraPermissions!();
   const activeList = lists.find((l) => l.id === activeScanListId);
 
+  // Tracks the measured position of the scan box so the dim overlay aligns exactly
+  const [frameLayout, setFrameLayout] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+
   const startPulse = () => {
     Animated.loop(
       Animated.sequence([
@@ -267,29 +275,51 @@ function NativeScannerScreen() {
     <View style={[styles.container, { backgroundColor: "#000" }]}>
       <NativeCam ref={cameraRef as React.Ref<unknown>} style={StyleSheet.absoluteFill} facing="back" />
 
-      {/* Dim overlay */}
-      <View style={styles.dimOverlay} pointerEvents="none">
-        <View style={styles.dimTop} />
-        <View style={styles.dimMiddle}>
-          <View style={styles.dimSide} />
-          <View style={styles.frameWindow} />
-          <View style={styles.dimSide} />
+      {/* ── Dim overlay: 4 panels cut around the measured frame position ── */}
+      {frameLayout && (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          {/* Top */}
+          <View style={[styles.dimRegion, {
+            top: 0, left: 0, right: 0,
+            height: frameLayout.y,
+          }]} />
+          {/* Bottom */}
+          <View style={[styles.dimRegion, {
+            top: frameLayout.y + frameLayout.height,
+            left: 0, right: 0, bottom: 0,
+          }]} />
+          {/* Left */}
+          <View style={[styles.dimRegion, {
+            top: frameLayout.y,
+            left: 0,
+            width: frameLayout.x,
+            height: frameLayout.height,
+          }]} />
+          {/* Right */}
+          <View style={[styles.dimRegion, {
+            top: frameLayout.y,
+            left: frameLayout.x + frameLayout.width,
+            right: 0,
+            height: frameLayout.height,
+          }]} />
         </View>
-        <View style={styles.dimBottom} />
-      </View>
+      )}
 
       {/* Header */}
       <View style={[styles.nativeHeader, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.nativeHeaderTitle}>Scan Card</Text>
-        <View style={[styles.listBadgeDark]}>
+        <View style={styles.listBadgeDark}>
           <View style={[styles.listDot, { backgroundColor: activeList?.color ?? colors.accent }]} />
           <Text style={styles.listBadgeDarkText}>{activeList?.name ?? "My Scans"}</Text>
         </View>
       </View>
 
-      {/* Frame corners */}
-      <View style={styles.frameOverlay}>
-        <Animated.View style={[styles.scanBox, { transform: [{ scale: pulseAnim }] }]}>
+      {/* Frame corners — onLayout is the source of truth for dim overlay position */}
+      <View style={styles.frameOverlay} pointerEvents="none">
+        <Animated.View
+          style={[styles.scanBox, { transform: [{ scale: pulseAnim }] }]}
+          onLayout={(e) => setFrameLayout(e.nativeEvent.layout)}
+        >
           <View style={[styles.corner, styles.cornerTL, { borderColor: colors.accent }]} />
           <View style={[styles.corner, styles.cornerTR, { borderColor: colors.accent }]} />
           <View style={[styles.corner, styles.cornerBL, { borderColor: colors.accent }]} />
@@ -304,12 +334,10 @@ function NativeScannerScreen() {
 
       {/* Bottom controls */}
       <View style={[styles.nativeBottom, { paddingBottom: insets.bottom + 90 }]}>
-        {/* Upload option */}
         <Pressable style={styles.nativeUpload} onPress={handleUpload} disabled={scanState === "scanning"}>
           <Ionicons name="image-outline" size={22} color="rgba(255,255,255,0.7)" />
         </Pressable>
 
-        {/* Capture button */}
         <Pressable
           style={({ pressed }) => [styles.nativeCapture, { opacity: pressed || scanState === "scanning" ? 0.8 : 1 }]}
           onPress={handleCapture}
@@ -325,7 +353,6 @@ function NativeScannerScreen() {
           </View>
         </Pressable>
 
-        {/* Spacer to balance the upload button */}
         <View style={{ width: 44 }} />
       </View>
 
@@ -380,13 +407,8 @@ const styles = StyleSheet.create({
   },
   uploadBtnText: { fontSize: 14, fontFamily: "Poppins_500Medium" },
 
-  // Native
-  dimOverlay: { ...StyleSheet.absoluteFillObject, flexDirection: "column" },
-  dimTop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)" },
-  dimMiddle: { flexDirection: "row", height: FRAME_H },
-  dimSide: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)" },
-  frameWindow: { width: FRAME_W, backgroundColor: "transparent" },
-  dimBottom: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)" },
+  // Native dim overlay — 4 absolute panels around the measured frame hole
+  dimRegion: { position: "absolute", backgroundColor: "rgba(0,0,0,0.55)" },
 
   nativeHeader: {
     position: "absolute", top: 0, left: 0, right: 0,
