@@ -78,7 +78,7 @@ function TradeCalculator({ totalValue, colors }: { totalValue: number; colors: a
             onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setCustomModalVisible(true); }}
           >
             <Text style={[calcStyles.pctBtnText, { color: activePreset === -1 ? colors.background : colors.mutedForeground }]}>
-              {activePreset === -1 && customPct !== null ? `${customPct}%` : "···"}
+              {activePreset === -1 && customPct !== null ? `${customPct}%` : "\u00b7\u00b7\u00b7"}
             </Text>
           </Pressable>
         </View>
@@ -162,17 +162,23 @@ export default function ScansScreen() {
 
   const handleDeleteList = (list: ScanList) => {
     if (list.id === "default") return;
-    Alert.alert("Delete List", `Delete "${list.name}" and its scans?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete", style: "destructive",
-        onPress: () => {
-          deleteList(list.id);
-          setSelectedListId(lists[0]?.id ?? "default");
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    Alert.alert(
+      "Delete List",
+      `Delete \"${list.name}\" and all its scans?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            deleteList(list.id);
+            if (selectedListId === list.id) setSelectedListId(lists[0]?.id ?? "default");
+            setShowDropdown(false);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          },
         },
-      },
-    ]);
+      ]
+    );
   };
 
   const handleDeleteScan = (id: string) => {
@@ -245,10 +251,10 @@ export default function ScansScreen() {
         )}
       />
 
-      {/* Dropdown modal */}
+      {/* ── Dropdown modal ── */}
       <Modal visible={showDropdown} transparent animationType="fade" onRequestClose={() => setShowDropdown(false)}>
         <Pressable style={styles.dropOverlay} onPress={() => setShowDropdown(false)}>
-          <View style={[styles.dropMenu, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Pressable onPress={() => {}} style={[styles.dropMenu, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Text style={[styles.dropMenuTitle, { color: colors.mutedForeground }]}>SELECT LIST</Text>
             {lists.map((list) => {
               const count = scans.filter((s) => s.listId === list.id).length;
@@ -258,59 +264,70 @@ export default function ScansScreen() {
                   key={list.id}
                   style={[styles.dropItem, active && { backgroundColor: colors.surface }]}
                   onPress={() => handleSelectList(list.id)}
-                  onLongPress={() => handleDeleteList(list)}
                 >
                   <View style={[styles.dropDot, { backgroundColor: list.color }]} />
                   <Text style={[styles.dropItemText, { color: active ? colors.foreground : colors.mutedForeground }]}>
                     {list.name}
                   </Text>
                   <Text style={[styles.dropItemCount, { color: colors.mutedForeground }]}>{count}</Text>
-                  {active && <Ionicons name="checkmark" size={16} color={colors.accent} />}
+                  {active && <Ionicons name="checkmark" size={16} color={colors.accent} style={{ marginRight: 4 }} />}
+                  {list.id !== "default" && (
+                    <Pressable
+                      hitSlop={12}
+                      onPress={() => handleDeleteList(list)}
+                      style={[styles.dropDeleteBtn, { backgroundColor: colors.destructive + "20" }]}
+                    >
+                      <Ionicons name="trash-outline" size={14} color={colors.destructive} />
+                    </Pressable>
+                  )}
                 </Pressable>
               );
             })}
-          </View>
+          </Pressable>
         </Pressable>
       </Modal>
 
-      {/* New List modal */}
-      <Modal visible={showNewList} transparent animationType="slide" onRequestClose={() => setShowNewList(false)}>
-        <Pressable style={styles.overlay} onPress={() => setShowNewList(false)}>
-          <View style={[styles.sheet, { backgroundColor: colors.card, paddingBottom: insets.bottom + 20 }]}>
-            <Pressable onPress={() => {}}>
-              <View style={[styles.handle, { backgroundColor: colors.border }]} />
-              <Text style={[styles.sheetTitle, { color: colors.foreground }]}>New List</Text>
-              <TextInput
-                style={[styles.input, { backgroundColor: colors.surface, color: colors.foreground, borderColor: colors.border }]}
-                placeholder="List name"
-                placeholderTextColor={colors.mutedForeground}
-                value={newListName}
-                onChangeText={setNewListName}
-                autoFocus
-                returnKeyType="done"
-                onSubmitEditing={handleCreateList}
-              />
-              <Text style={[styles.colorLabel, { color: colors.mutedForeground }]}>Color</Text>
-              <View style={styles.colorRow}>
-                {LIST_COLORS.map((c) => (
-                  <Pressable
-                    key={c}
-                    style={[styles.colorDot, { backgroundColor: c }, newListColor === c && styles.colorDotActive]}
-                    onPress={() => setNewListColor(c)}
-                  />
-                ))}
-              </View>
+      {/* ── New List dialog (centered modal) ── */}
+      <Modal visible={showNewList} transparent animationType="fade" onRequestClose={() => setShowNewList(false)}>
+        <Pressable style={styles.dialogOverlay} onPress={() => setShowNewList(false)}>
+          <Pressable onPress={() => {}} style={[styles.dialogBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.dialogTitle, { color: colors.foreground }]}>New List</Text>
+            <TextInput
+              style={[styles.dialogInput, { backgroundColor: colors.surface, color: colors.foreground, borderColor: colors.border }]}
+              placeholder="List name"
+              placeholderTextColor={colors.mutedForeground}
+              value={newListName}
+              onChangeText={setNewListName}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={handleCreateList}
+            />
+            <Text style={[styles.colorLabel, { color: colors.mutedForeground }]}>Color</Text>
+            <View style={styles.colorRow}>
+              {LIST_COLORS.map((c) => (
+                <Pressable
+                  key={c}
+                  style={[styles.colorDot, { backgroundColor: c }, newListColor === c && styles.colorDotActive]}
+                  onPress={() => setNewListColor(c)}
+                />
+              ))}
+            </View>
+            <View style={styles.dialogActions}>
               <Pressable
-                style={[styles.createBtn, { backgroundColor: newListName.trim() ? colors.accent : colors.surface }]}
+                style={[styles.dialogBtn, { borderColor: colors.border, borderWidth: 1 }]}
+                onPress={() => { setShowNewList(false); setNewListName(""); setNewListColor(LIST_COLORS[0]); }}
+              >
+                <Text style={[styles.dialogBtnText, { color: colors.mutedForeground }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.dialogBtn, { backgroundColor: newListName.trim() ? colors.accent : colors.surface }]}
                 onPress={handleCreateList}
                 disabled={!newListName.trim()}
               >
-                <Text style={[styles.createBtnText, { color: newListName.trim() ? colors.background : colors.mutedForeground }]}>
-                  Create List
-                </Text>
+                <Text style={[styles.dialogBtnText, { color: newListName.trim() ? colors.background : colors.mutedForeground }]}>Create</Text>
               </Pressable>
-            </Pressable>
-          </View>
+            </View>
+          </Pressable>
         </Pressable>
       </Modal>
     </View>
@@ -338,6 +355,7 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 18, fontFamily: "Poppins_600SemiBold" },
   emptySub: { fontSize: 13, fontFamily: "Poppins_400Regular" },
 
+  // Dropdown
   dropOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", paddingHorizontal: 24 },
   dropMenu: { width: "100%", borderRadius: 18, borderWidth: 1, paddingVertical: 8, overflow: "hidden" },
   dropMenuTitle: { fontSize: 10, fontFamily: "Poppins_500Medium", textTransform: "uppercase", letterSpacing: 1, paddingHorizontal: 18, paddingVertical: 10 },
@@ -345,18 +363,20 @@ const styles = StyleSheet.create({
   dropDot: { width: 10, height: 10, borderRadius: 5 },
   dropItemText: { flex: 1, fontSize: 15, fontFamily: "Poppins_500Medium" },
   dropItemCount: { fontSize: 13, fontFamily: "Poppins_400Regular", marginRight: 4 },
+  dropDeleteBtn: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center" },
 
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
-  sheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 12, paddingHorizontal: 20 },
-  handle: { width: 36, height: 4, borderRadius: 2, alignSelf: "center", marginBottom: 20 },
-  sheetTitle: { fontSize: 20, fontFamily: "Poppins_700Bold", marginBottom: 20 },
-  input: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 16, paddingVertical: 12, fontSize: 15, fontFamily: "Poppins_400Regular", marginBottom: 20 },
-  colorLabel: { fontSize: 11, fontFamily: "Poppins_500Medium", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 12 },
+  // New List dialog
+  dialogOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", paddingHorizontal: 28 },
+  dialogBox: { width: "100%", borderRadius: 20, borderWidth: 1, padding: 24, gap: 0 },
+  dialogTitle: { fontSize: 18, fontFamily: "Poppins_700Bold", marginBottom: 16 },
+  dialogInput: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 16, paddingVertical: 12, fontSize: 15, fontFamily: "Poppins_400Regular", marginBottom: 20 },
+  colorLabel: { fontSize: 10, fontFamily: "Poppins_500Medium", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 10 },
   colorRow: { flexDirection: "row", gap: 10, flexWrap: "wrap", marginBottom: 24 },
-  colorDot: { width: 32, height: 32, borderRadius: 16 },
+  colorDot: { width: 30, height: 30, borderRadius: 15 },
   colorDotActive: { borderWidth: 3, borderColor: "#fff", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.4, shadowRadius: 4, elevation: 4 },
-  createBtn: { paddingVertical: 15, borderRadius: 14, alignItems: "center" },
-  createBtnText: { fontSize: 16, fontFamily: "Poppins_600SemiBold" },
+  dialogActions: { flexDirection: "row", gap: 10 },
+  dialogBtn: { flex: 1, paddingVertical: 13, borderRadius: 12, alignItems: "center" },
+  dialogBtnText: { fontSize: 15, fontFamily: "Poppins_600SemiBold" },
 });
 
 const calcStyles = StyleSheet.create({

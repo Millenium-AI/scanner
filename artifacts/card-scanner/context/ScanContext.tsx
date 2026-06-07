@@ -52,6 +52,7 @@ interface ScanContextType {
   removeFromCollection: (id: string) => void;
   updateCollectionQuantity: (id: string, quantity: number) => void;
   totalCollectionValue: number;
+  refreshCollectionPrices: () => Promise<void>;
 }
 
 const SCANS_KEY = "@card_scanner_scans";
@@ -66,6 +67,8 @@ const DEFAULT_LIST: ScanList = {
 };
 
 const LIST_COLORS = ["#00C4CC", "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD", "#98D8C8"];
+
+const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:4000";
 
 const ScanContext = createContext<ScanContextType | null>(null);
 
@@ -195,6 +198,43 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     });
   }, [persistCollection]);
 
+  const refreshCollectionPrices = useCallback(async () => {
+    const snapshot = await AsyncStorage.getItem(COLLECTION_KEY);
+    if (!snapshot) return;
+    const current: CollectionCard[] = JSON.parse(snapshot);
+    if (!current.length) return;
+
+    const cardIds = current.map((c) => c.card.cardId);
+    const res = await fetch(`${API_BASE}/refresh-prices`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cardIds }),
+    });
+
+    if (!res.ok) throw new Error(`refresh-prices failed: ${res.status}`);
+
+    const updated: { cardId: string; marketValue?: number; lowValue?: number; highValue?: number }[] = await res.json();
+
+    setCollection((prev) => {
+      const map = new Map(updated.map((u) => [u.cardId, u]));
+      const refreshed = prev.map((c) => {
+        const fresh = map.get(c.card.cardId);
+        if (!fresh) return c;
+        return {
+          ...c,
+          card: {
+            ...c.card,
+            marketValue: fresh.marketValue ?? c.card.marketValue,
+            lowValue: fresh.lowValue ?? c.card.lowValue,
+            highValue: fresh.highValue ?? c.card.highValue,
+          },
+        };
+      });
+      persistCollection(refreshed);
+      return refreshed;
+    });
+  }, [persistCollection]);
+
   const totalCollectionValue = collection.reduce((sum, c) => {
     return sum + (c.card.marketValue ?? 0) * c.quantity;
   }, 0);
@@ -215,6 +255,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         removeFromCollection,
         updateCollectionQuantity,
         totalCollectionValue,
+        refreshCollectionPrices,
       }}
     >
       {children}

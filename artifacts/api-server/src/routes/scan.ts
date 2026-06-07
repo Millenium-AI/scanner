@@ -107,6 +107,35 @@ async function lookupCard(name: string, number: string | null): Promise<any> {
   };
 }
 
+async function lookupPriceById(cardId: string): Promise<{ cardId: string; marketValue?: number; lowValue?: number; highValue?: number } | null> {
+  const apiKey = process.env.POKEWALLET_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const res = await fetch(
+      `${POKEWALLET_BASE}/cards/${encodeURIComponent(cardId)}`,
+      {
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "X-API-Key": apiKey,
+          "Content-Type": "application/json",
+        }
+      }
+    );
+    if (!res.ok) return null;
+    const data = await res.json() as any;
+    const tcg = data.tcgplayer;
+    return {
+      cardId,
+      marketValue: tcg?.prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil")?.market_price ?? tcg?.prices?.[0]?.market_price ?? undefined,
+      lowValue: tcg?.prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil")?.low_price ?? tcg?.prices?.[0]?.low_price ?? undefined,
+      highValue: tcg?.prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil")?.high_price ?? tcg?.prices?.[0]?.high_price ?? undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 router.post("/identify-card", upload.single("image"), async (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: "No image provided" });
@@ -147,6 +176,31 @@ router.post("/identify-card", upload.single("image"), async (req, res) => {
     console.error("identify-card error:", err);
     res.status(500).json({
       error: "Failed to identify card",
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+// POST /refresh-prices
+// Body: { cardIds: string[] }
+// Returns: array of { cardId, marketValue?, lowValue?, highValue? }
+router.post("/refresh-prices", async (req, res) => {
+  const { cardIds } = req.body as { cardIds?: string[] };
+  if (!Array.isArray(cardIds) || cardIds.length === 0) {
+    res.status(400).json({ error: "cardIds must be a non-empty array" });
+    return;
+  }
+
+  try {
+    const results = await Promise.all(
+      cardIds.map((id) => lookupPriceById(id))
+    );
+    // Filter out nulls (lookup failures keep old price on client)
+    res.json(results.filter(Boolean));
+  } catch (err: unknown) {
+    console.error("refresh-prices error:", err);
+    res.status(500).json({
+      error: "Failed to refresh prices",
       message: err instanceof Error ? err.message : String(err),
     });
   }
