@@ -93,27 +93,22 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
                 {result.rarity ? ` · ${result.rarity}` : ""}
               </Text>
 
-              {/* Value card */}
+              {/* Market price row + TCGplayer button */}
               {result.marketValue !== undefined && (
-                <View style={[styles.valueCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}>
-                  <View style={styles.valueRow}>
-                    {[
-                      { label: "Low", val: result.lowValue, main: false },
-                      { label: "Market", val: result.marketValue, main: true },
-                      { label: "High", val: result.highValue, main: false },
-                    ].map((v, i) => (
-                      <React.Fragment key={v.label}>
-                        {i > 0 && <View style={[styles.vDivider, { backgroundColor: colors.border }]} />}
-                        <View style={styles.valItem}>
-                          <Text style={[styles.valLabel, { color: colors.mutedForeground }]}>{v.label}</Text>
-                          <Text style={[v.main ? styles.valMain : styles.valAmt,
-                            { color: v.main ? colors.accent : colors.foreground }]}>
-                            {fmt(v.val)}
-                          </Text>
-                        </View>
-                      </React.Fragment>
-                    ))}
+                <View style={[styles.marketRow, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}>
+                  <View style={styles.marketLeft}>
+                    <Text style={[styles.marketLabel, { color: colors.mutedForeground }]}>MARKET</Text>
+                    <Text style={[styles.marketValue, { color: colors.accent }]}>{fmt(result.marketValue)}</Text>
                   </View>
+                  {(result as any).tcg_url && (
+                    <Pressable
+                      style={[styles.tcgBtn, { backgroundColor: colors.accent + "18", borderColor: colors.accent + "40", borderWidth: 1 }]}
+                      onPress={handleTCGPlayer}
+                    >
+                      <Ionicons name="open-outline" size={15} color={colors.accent} />
+                      <Text style={[styles.tcgBtnText, { color: colors.accent }]}>TCGplayer</Text>
+                    </Pressable>
+                  )}
                 </View>
               )}
 
@@ -125,28 +120,21 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
 
               {/* Actions */}
               <View style={styles.actions}>
-                <Pressable style={[styles.btn, styles.btnPrimary, { backgroundColor: colors.accent }]} onPress={handleCollection}>
-                  <Ionicons name="albums" size={18} color={colors.background} />
-                  <Text style={[styles.btnText, { color: colors.background }]}>Add to Collection</Text>
+                <Pressable style={[styles.btn, styles.btnGhost, { borderColor: colors.border }]} onPress={onScanAgain}>
+                  <Ionicons name="scan" size={18} color={colors.mutedForeground} />
+                  <Text style={[styles.btnText, { color: colors.mutedForeground }]}>Scan Again</Text>
                 </Pressable>
 
                 <Pressable style={[styles.btn, styles.btnSecondary, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleSave}>
                   <Ionicons name="bookmark-outline" size={18} color={colors.foreground} />
                   <Text style={[styles.btnText, { color: colors.foreground }]}>
-                    Save to {activeList?.name ?? "Scans"}
+                    Add to List
                   </Text>
                 </Pressable>
 
-                {(result as any).tcg_url && (
-                  <Pressable style={[styles.btn, styles.btnSecondary, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleTCGPlayer}>
-                    <Ionicons name="open-outline" size={18} color={colors.foreground} />
-                    <Text style={[styles.btnText, { color: colors.foreground }]}>View on TCGplayer</Text>
-                  </Pressable>
-                )}
-
-                <Pressable style={[styles.btn, styles.btnGhost, { borderColor: colors.border }]} onPress={onScanAgain}>
-                  <Ionicons name="scan" size={18} color={colors.mutedForeground} />
-                  <Text style={[styles.btnText, { color: colors.mutedForeground }]}>Scan Again</Text>
+                <Pressable style={[styles.btn, styles.btnPrimary, { backgroundColor: colors.accent }]} onPress={handleCollection}>
+                  <Ionicons name="albums" size={18} color={colors.background} />
+                  <Text style={[styles.btnText, { color: colors.background }]}>Add to Collection</Text>
                 </Pressable>
               </View>
             </ScrollView>
@@ -169,17 +157,16 @@ const styles = StyleSheet.create({
   confText: { fontSize: 11, fontFamily: "Poppins_600SemiBold" },
 
   cardName: { fontSize: 24, fontFamily: "Poppins_700Bold", marginBottom: 4 },
-  setLine: { fontSize: 13, fontFamily: "Poppins_400Regular", marginBottom: 20 },
+  setLine: { fontSize: 13, fontFamily: "Poppins_400Regular", marginBottom: 16 },
 
-  valueCard: { borderRadius: 16, padding: 16, marginBottom: 16 },
-  valueRow: { flexDirection: "row", alignItems: "center" },
-  valItem: { flex: 1, alignItems: "center", gap: 4 },
-  vDivider: { width: 1, height: 40 },
-  valLabel: { fontSize: 11, fontFamily: "Poppins_500Medium", textTransform: "uppercase", letterSpacing: 0.5 },
-  valAmt: { fontSize: 16, fontFamily: "Poppins_600SemiBold" },
-  valMain: { fontSize: 24, fontFamily: "Poppins_700Bold" },
+  marketRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 16, paddingVertical: 14, paddingHorizontal: 18, marginBottom: 16 },
+  marketLeft: { gap: 2 },
+  marketLabel: { fontSize: 10, fontFamily: "Poppins_500Medium", textTransform: "uppercase", letterSpacing: 0.8 },
+  marketValue: { fontSize: 28, fontFamily: "Poppins_700Bold" },
+  tcgBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12 },
+  tcgBtnText: { fontSize: 13, fontFamily: "Poppins_600SemiBold" },
 
-  condition: { fontSize: 13, fontFamily: "Poppins_400Regular", marginBottom: 20 },
+  condition: { fontSize: 13, fontFamily: "Poppins_400Regular", marginBottom: 16 },
 
   actions: { gap: 10, marginTop: 4 },
   btn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 15, borderRadius: 14, gap: 8 },
