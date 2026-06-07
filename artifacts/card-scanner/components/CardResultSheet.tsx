@@ -24,7 +24,7 @@ import { CardScanResult, LIST_COLORS, useScanContext } from "@/context/ScanConte
 import { useColors } from "@/hooks/useColors";
 
 const SCREEN_H = Dimensions.get("window").height;
-const DISMISS_THRESHOLD = 80;
+const DISMISS_THRESHOLD = 60; // slightly easier swipe to dismiss
 
 interface CardResultSheetProps {
   visible: boolean;
@@ -74,7 +74,10 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
 
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) => g.dy > 6,
+      onMoveShouldSetPanResponder: (_, g) => {
+        const isVertical = Math.abs(g.dy) > Math.abs(g.dx);
+        return isVertical && Math.abs(g.dy) > 6;
+      },
       onPanResponderMove: (_, g) => {
         if (g.dy > 0) translateY.setValue(g.dy);
       },
@@ -156,7 +159,7 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
       <KeyboardAvoidingView
         style={styles.overlayWrap}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={insets.top + 32}
+        keyboardVerticalOffset={insets.bottom}
       >
         <Pressable style={styles.dismissArea} onPress={onClose} />
         <Animated.View
@@ -506,7 +509,7 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
 const styles = StyleSheet.create({
   overlayWrap: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.7)",
+    backgroundColor: "rgba(0,0,0,0.6)",
     justifyContent: "flex-end",
   },
   dismissArea: { flex: 1 },
