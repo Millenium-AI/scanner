@@ -46,9 +46,7 @@ async function ensureTCGDexCacheLoaded() {
   tcgdexSets = (await setsRes.json()) as TCGdexSetBrief[];
   tcgdexCacheTs = now;
 
-  console.log(
-    `[tcgdex] cache loaded: ${tcgdexCards.length} cards, ${tcgdexSets.length} sets`
-  );
+  console.log(`[tcgdex] cache loaded: ${tcgdexCards.length} cards, ${tcgdexSets.length} sets`);
 }
 
 // --- Helpers ---
@@ -65,7 +63,7 @@ function buildImageUrl(cardId: string): string {
   return `${base}/card-image/${encodeURIComponent(cardId)}`;
 }
 
-// --- In-memory cache (1 hour TTL, max 500 entries) ---
+// --- In-memory search cache (1 hour TTL, max 500 entries) ---
 const searchCache = new Map<string, { data: any[]; ts: number }>();
 const CACHE_TTL = 1000 * 60 * 60;
 
@@ -135,7 +133,7 @@ function mapOnePieceResult(card: any): any {
 // --- TCGdex (Pokemon) mapper ---
 
 function mapPokemonResultFromTCGdex(card: any): any {
-  const cardId: string = card.id; // e.g. "swsh3-136"
+  const cardId: string = card.id;
   const pricing = card.pricing ?? {};
   const tcg = pricing.tcgplayer ?? {};
   const cm = pricing.cardmarket ?? {};
@@ -148,7 +146,8 @@ function mapPokemonResultFromTCGdex(card: any): any {
         ? cm.avg
         : undefined;
 
-  const imageBare: string | undefined = card.image; // e.g. https://assets.tcgdex.net/en/base/base1/1
+  // Images come directly from TCGdex CDN: card.image + /high/webp
+  const imageBare: string | undefined = card.image;
   const imageUrl = imageBare ? `${imageBare}/high/webp` : undefined;
 
   return {
@@ -179,34 +178,38 @@ async function ocrCard(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "google/gemini-2.5-flash-lite",
+      model: "google/gemini-2.5-flash",
       messages: [{
         role: "user",
         content: [
           {
             type: "text",
-            text: `You are a TCG card reader.
+            text: `You are a TCG card reader. Examine the card image carefully.
 
-From the image, determine:
-1. Card NAME (top of card)
-2. COLLECTOR NUMBER
-   - Pokemon: typically like "215/197", "001/165", etc.
-   - One Piece: like "OP01-001", "OP05-060", etc.
-3. SET NAME (for Pokemon: the expansion name, e.g. "Obsidian Flames", "Paldean Fates". For One Piece: the set name like "Romance Dawn".)
-4. GAME: must be EXACTLY one of "Pokemon" or "One Piece".
+Extract the following fields:
 
-Use card layout cues:
-- Pokemon collector number is usually bottom-left of the artwork frame.
-- One Piece collector number is usually bottom-right.
+1. NAME — the card's name printed at the top.
 
-Respond ONLY with strict JSON, no markdown:
+2. COLLECTOR NUMBER — read this precisely:
+   - Pokemon: printed in small text at the BOTTOM-LEFT of the card, below the artwork. Format is always "NNN/TTT" (e.g. "215/197", "001/165"). Read BOTH the left number and the right number separated by "/". Do NOT guess — if you cannot clearly see both digits, return null.
+   - One Piece: printed at the BOTTOM-RIGHT, format like "OP01-001".
+
+3. SET NAME — the expansion/set name:
+   - Pokemon: usually printed at the bottom of the card near the collector number, e.g. "Obsidian Flames", "Paldean Fates", "Temporal Forces". If not visible as text, return null.
+   - One Piece: e.g. "Romance Dawn", "Paramount War".
+
+4. GAME — must be EXACTLY "Pokemon" or "One Piece".
+   - Pokemon cards have HP, type symbols, evolution stage.
+   - One Piece cards have a life/cost number in the top-left circle.
+
+Respond ONLY with strict JSON (no markdown, no extra text):
 {"name":"Charizard ex","number":"215/197","setName":"Obsidian Flames","game":"Pokemon","confidence":0.95}
 
 Rules:
-- JSON only.
-- Use null for name/number/setName if unreadable.
-- NEVER guess the game; if truly unclear, set "game":"Pokemon" only if the layout clearly matches Pokemon, otherwise "One Piece" if it clearly matches that layout.
-- confidence is a number between 0 and 1 indicating how sure you are.`,
+- JSON only, no markdown fences.
+- "number" must include BOTH sides of the slash for Pokemon (e.g. "215/197"), not just one side.
+- Use null for any field you cannot confidently read.
+- confidence: float 0–1 reflecting overall certainty across all fields.`,
           },
           { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
         ],
@@ -230,22 +233,15 @@ Rules:
   };
 }
 
-// --- Rectangle detection helpers ---
-// Scores a JPEG/PNG buffer for the presence of a prominent rectangle (card)
-// using a lightweight edge-density heuristic without any native Vision dependency.
-// Returns true when a clear rectangular region is detected.
+// --- Rectangle detection ---
+// Uses strict card aspect-ratio bounds (portrait 1.28–1.60) plus a minimum
+// entropy floor to distinguish a focused card from an empty camera frame.
 function detectRectangleInBuffer(buffer: Buffer): boolean {
-  // We look for the JFIF/EXIF image dimensions to understand aspect ratio,
-  // then apply a simple brightness-variance scan across horizontal lines to
-  // estimate whether a high-contrast rectangular edge structure is present.
-  // This is intentionally cheap (no opencv, no python) but effective for
-  // cards held against typical backgrounds.
-
-  // --- Minimal JPEG dimension parser ---
   let width = 0;
   let height = 0;
+
+  // Parse JPEG dimensions from SOF marker
   if (buffer[0] === 0xff && buffer[1] === 0xd8) {
-    // JPEG: scan for SOF marker
     let i = 2;
     while (i < buffer.length - 8) {
       if (buffer[i] !== 0xff) { i++; continue; }
@@ -265,22 +261,34 @@ function detectRectangleInBuffer(buffer: Buffer): boolean {
     }
   }
 
-  // If we couldn't parse dimensions, optimistically allow OCR
-  if (width === 0 || height === 0) return true;
+  // Cannot parse dimensions — optimistically allow
+  if (width === 0 || height === 0) {
+    console.log("[detect-rectangle] could not parse dimensions, allowing");
+    return true;
+  }
 
-  // Trading cards have aspect ratios between ~1.3 and ~1.6 (portrait)
+  // Strict portrait ratio for a TCG card: 1.28–1.60 (63×88mm = 1.397)
+  // Phone camera frames are typically 4:3 (1.33) or 16:9 (1.78).
+  // A card filling most of the frame will be portrait within 1.28–1.60.
+  // We also accept landscape-rotated cards: ratio 0.625–0.78 (inverse).
   const ratio = height / width;
-  if (ratio < 1.1 || ratio > 2.0) {
-    // Aspect ratio doesn't match a card — likely no card in frame
+  const portraitCard = ratio >= 1.28 && ratio <= 1.60;
+  const landscapeCard = ratio >= 0.625 && ratio <= 0.78;
+
+  if (!portraitCard && !landscapeCard) {
+    console.log(`[detect-rectangle] ratio ${ratio.toFixed(3)} out of card range — skip`);
     return false;
   }
 
-  // Additional heuristic: file size relative to dimensions.
-  // A well-focused card photo compresses less than a blurry/blank frame.
-  // Empirically, a 0.7-quality JPEG of a card at ~300x420 should be > 15 KB.
-  const expectedMinBytes = (width * height) / 400;
-  if (buffer.length < expectedMinBytes) return false;
+  // Entropy floor: a focused card image compresses poorly (more detail).
+  // bytes-per-pixel > 0.15 at quality 0.85 is a reasonable lower bound.
+  const bpp = buffer.length / (width * height);
+  if (bpp < 0.04) {
+    console.log(`[detect-rectangle] bpp ${bpp.toFixed(4)} too low (blank/blurry frame) — skip`);
+    return false;
+  }
 
+  console.log(`[detect-rectangle] PASS ratio=${ratio.toFixed(3)} bpp=${bpp.toFixed(4)}`);
   return true;
 }
 
@@ -328,12 +336,10 @@ async function lookupPokemonCardViaTCGdex(name: string, number: string | null, s
   const normalizedName = name.toLowerCase();
   const { local, total } = parsePokemonCollectorNumber(number);
 
-  // 1. Start from cards whose name matches.
+  // 1. Name match (exact then substring)
   let candidates = tcgdexCards.filter(
     (c) => typeof c.name === "string" && c.name.toLowerCase() === normalizedName
   );
-
-  // If no exact name match, fall back to substring to be more forgiving.
   if (candidates.length === 0) {
     candidates = tcgdexCards.filter(
       (c) => typeof c.name === "string" && c.name.toLowerCase().includes(normalizedName)
@@ -345,10 +351,11 @@ async function lookupPokemonCardViaTCGdex(name: string, number: string | null, s
     return null;
   }
 
-  // 2. If we have a local and total, use both plus setName (if available).
+  // 2. Narrow by local + total (both sides of collector number)
   if (local && total) {
     let matchingSets = tcgdexSets.filter((s) => s.cardCount && s.cardCount.total === total);
 
+    // Additionally filter by set name when OCR provided it
     if (setName) {
       const target = normalizeSetName(setName);
       const bySetName = matchingSets.filter((s) => {
@@ -357,6 +364,8 @@ async function lookupPokemonCardViaTCGdex(name: string, number: string | null, s
       });
       if (bySetName.length > 0) {
         matchingSets = bySetName;
+      } else {
+        console.log("[tcgdex] setName filter yielded 0 results, ignoring setName:", setName);
       }
     }
 
@@ -370,37 +379,32 @@ async function lookupPokemonCardViaTCGdex(name: string, number: string | null, s
       return String(localId) === String(local);
     });
 
-    if (narrowed.length === 1) {
-      candidates = narrowed;
-    } else if (narrowed.length > 1) {
-      console.log(
-        "[tcgdex] multiple candidates after set+local filter, picking first",
-        { name: normalizedName, number, setName, narrowed: narrowed.map((c) => c.id) }
-      );
+    if (narrowed.length >= 1) {
+      if (narrowed.length > 1) {
+        console.log("[tcgdex] multiple after set+local filter, picking first",
+          { name: normalizedName, number, setName, ids: narrowed.map((c) => c.id) });
+      }
       candidates = narrowed;
     } else {
-      console.log(
-        "[tcgdex] no candidates after set+local filter, falling back to name-only",
-        { name: normalizedName, number, setName }
-      );
+      console.log("[tcgdex] no match after set+local filter, falling back to name-only",
+        { name: normalizedName, number, setName });
     }
   } else if (setName && candidates.length > 1) {
-    // If we don't have full collector number but do have setName, use it to narrow candidates.
+    // No collector number but have set name — narrow by set
     const target = normalizeSetName(setName);
     const bySetName = candidates.filter((c) => {
       const norm = normalizeSetName(c.set?.name);
       return norm === target || norm.includes(target) || target.includes(norm);
     });
-    if (bySetName.length > 0) {
-      candidates = bySetName;
-    }
+    if (bySetName.length > 0) candidates = bySetName;
   }
 
   const cardResume = candidates[0];
   if (!cardResume) return null;
 
-  const cardId = cardResume.id as string;
-  const fullRes = await fetch(`${TCGDEX_BASE}/cards/${encodeURIComponent(cardId)}`);
+  console.log("[tcgdex] resolved card:", cardResume.id, "set:", cardResume.set?.name);
+
+  const fullRes = await fetch(`${TCGDEX_BASE}/cards/${encodeURIComponent(cardResume.id)}`);
   if (!fullRes.ok) throw new Error(`TCGdex card fetch failed (${fullRes.status})`);
   const fullCard = await fullRes.json();
   return mapPokemonResultFromTCGdex(fullCard);
@@ -415,7 +419,6 @@ async function lookupCard(name: string, number: string | null, game: string, set
     return lookupOnePieceCard(name, number, apiKey);
   }
 
-  // Default: treat as Pokemon and use free TCGdex
   return lookupPokemonCardViaTCGdex(name, number, setName);
 }
 
@@ -444,7 +447,7 @@ async function lookupPriceById(cardId: string): Promise<{ cardId: string; market
 
 // --- Routes ---
 
-// GET /card-image/:id — proxies PokeWallet images server-side (One Piece + any legacy Pokemon)
+// GET /card-image/:id — proxies PokeWallet images (One Piece + legacy Pokemon)
 router.get("/card-image/:id", async (req, res) => {
   const apiKey = process.env.POKEWALLET_API_KEY;
   if (!apiKey) { res.status(500).json({ error: "API key not configured" }); return; }
@@ -466,18 +469,14 @@ router.get("/card-image/:id", async (req, res) => {
 });
 
 // POST /detect-rectangle
-// Called by the client every 3 seconds before deciding to run OCR.
-// Returns { hasRectangle: boolean } — no OCR or PokeWallet/TCGdex calls are made here.
+// Called by the client every 3 seconds. Returns { hasRectangle: boolean }.
 router.post("/detect-rectangle", upload.single("image"), (req, res) => {
   if (!req.file) { res.status(400).json({ error: "No image provided" }); return; }
   const hasRectangle = detectRectangleInBuffer(req.file.buffer);
-  console.log(`[detect-rectangle] ${hasRectangle ? "PASS" : "SKIP"} — ${req.file.size} bytes, mime=${req.file.mimetype}`);
   res.json({ hasRectangle });
 });
 
-// GET /search?q=charizard&game=pokemon&limit=20
-// NOTE: This endpoint still uses PokéWallet for search UI features. The
-// scanner itself uses /identify-card which now routes Pokemon -> TCGdex.
+// GET /search
 router.get("/search", async (req, res) => {
   const apiKey = process.env.POKEWALLET_API_KEY;
   if (!apiKey) { res.status(500).json({ error: "POKEWALLET_API_KEY not set" }); return; }
@@ -521,32 +520,26 @@ router.get("/search", async (req, res) => {
 });
 
 // POST /identify-card
-// Pipeline: OCR first, then route by game:
-// - Pokemon  -> TCGdex (free, card + price + image)
-// - One Piece -> PokeWallet (paid, but only for confident scans)
 router.post("/identify-card", upload.single("image"), async (req, res) => {
   if (!req.file) { res.status(400).json({ error: "No image provided" }); return; }
   try {
     const ocr = await ocrCard(req.file.buffer.toString("base64"), req.file.mimetype);
     console.log("[identify-card] OCR result:", ocr);
 
-    // Gate 1: OCR must have produced a readable name
     if (!ocr.name) {
       res.status(422).json({ error: "Could not read card name", confidence: ocr.confidence });
       return;
     }
 
-    // Gate 2: Confidence must meet the threshold before any external lookup.
     const OCR_EXTERNAL_THRESHOLD = 0.75;
     if (ocr.confidence < OCR_EXTERNAL_THRESHOLD) {
-      console.log(`[identify-card] OCR confidence ${ocr.confidence} below threshold ${OCR_EXTERNAL_THRESHOLD} — skipping external lookups`);
+      console.log(`[identify-card] confidence ${ocr.confidence} below threshold — skipping lookups`);
       res.status(422).json({ error: "Could not read card clearly", confidence: ocr.confidence });
       return;
     }
 
-    // Gate 3: Basic text sanity — name must have at least 2 characters
     if (ocr.name.trim().length < 2) {
-      res.status(422).json({ error: "Card name too short to look up", confidence: ocr.confidence });
+      res.status(422).json({ error: "Card name too short", confidence: ocr.confidence });
       return;
     }
 
