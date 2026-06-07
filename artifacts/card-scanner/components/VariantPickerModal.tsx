@@ -76,7 +76,7 @@ export function VariantPickerModal({
 
             return (
               <Pressable
-                key={card.cardId ?? String(idx)}
+                key={`${card.cardId ?? "card"}-${idx}`}
                 style={({ pressed }) => [
                   styles.row,
                   {
