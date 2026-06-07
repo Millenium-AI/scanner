@@ -98,7 +98,7 @@ export default function CollectionScreen() {
         {refreshing && (
           <View style={styles.refreshBadge}>
             <ActivityIndicator size="small" color={colors.accent} />
-            <Text style={[styles.refreshLabel, { color: colors.accent }]}>Updating prices\u2026</Text>
+            <Text style={[styles.refreshLabel, { color: colors.accent }]}>Updating Prices</Text>
           </View>
         )}
       </View>
@@ -124,7 +124,7 @@ export default function CollectionScreen() {
         <Ionicons name="search-outline" size={18} color={colors.mutedForeground} />
         <TextInput
           style={[styles.searchInput, { color: colors.foreground }]}
-          placeholder="Search cards\u2026"
+          placeholder="Search Collection"
           placeholderTextColor={colors.mutedForeground}
           value={search}
           onChangeText={setSearch}

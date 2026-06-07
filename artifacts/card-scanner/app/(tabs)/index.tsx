@@ -151,7 +151,7 @@ function WebScannerScreen() {
           {scanState === "scanning" ? (
             <>
               <ActivityIndicator size="large" color={colors.accent} />
-              <Text style={[styles.frameHint, { color: colors.mutedForeground }]}>Identifying card\u2026</Text>
+              <Text style={[styles.frameHint, { color: colors.mutedForeground }]}>Identifying Card</Text>
             </>
           ) : (
             <>
@@ -388,7 +388,7 @@ function NativeScannerScreen() {
           <View style={[styles.corner, styles.cornerBR, { borderColor: colors.accent }]} />
         </Animated.View>
         <Text style={styles.nativeHint}>
-          {scanState === "scanning" ? "Identifying\u2026" :
+          {scanState === "scanning" ? "Identifying" :
             scanState === "error" ? errorMsg :
             "Hold card steady \u2014 scanning automatically"}
         </Text>
