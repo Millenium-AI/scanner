@@ -7,6 +7,50 @@ const upload = multer({ storage: multer.memoryStorage() });
 const POKEWALLET_BASE = "https://api.pokewallet.io";
 const TCGDEX_BASE = "https://api.tcgdex.net/v2/en";
 
+// --- TCGdex cache ---
+
+type TCGdexSetBrief = {
+  id: string;
+  name: string;
+  cardCount?: { total?: number };
+};
+
+type TCGdexCardBrief = {
+  id: string;
+  localId?: string | number;
+  name: string;
+  set?: { id: string; name: string };
+};
+
+let tcgdexCards: TCGdexCardBrief[] | null = null;
+let tcgdexSets: TCGdexSetBrief[] | null = null;
+let tcgdexCacheTs: number | null = null;
+
+const TCGDEX_CACHE_TTL_MS = 1000 * 60 * 60 * 6; // 6 hours
+
+async function ensureTCGDexCacheLoaded() {
+  const now = Date.now();
+  if (tcgdexCards && tcgdexSets && tcgdexCacheTs && now - tcgdexCacheTs < TCGDEX_CACHE_TTL_MS) {
+    return;
+  }
+
+  const [cardsRes, setsRes] = await Promise.all([
+    fetch(`${TCGDEX_BASE}/cards`),
+    fetch(`${TCGDEX_BASE}/sets`),
+  ]);
+
+  if (!cardsRes.ok) throw new Error(`TCGdex /cards failed (${cardsRes.status})`);
+  if (!setsRes.ok) throw new Error(`TCGdex /sets failed (${setsRes.status})`);
+
+  tcgdexCards = (await cardsRes.json()) as TCGdexCardBrief[];
+  tcgdexSets = (await setsRes.json()) as TCGdexSetBrief[];
+  tcgdexCacheTs = now;
+
+  console.log(
+    `[tcgdex] cache loaded: ${tcgdexCards.length} cards, ${tcgdexSets.length} sets`
+  );
+}
+
 // --- Helpers ---
 
 function pokeHeaders(apiKey: string) {
@@ -238,6 +282,18 @@ function detectRectangleInBuffer(buffer: Buffer): boolean {
   return true;
 }
 
+// --- Helper: parse Pokemon collector number (e.g. 215/197) ---
+
+function parsePokemonCollectorNumber(raw: string | null): { local?: number; total?: number } {
+  if (!raw) return {};
+  const m = raw.match(/(\d+)\s*\/\s*(\d+)/);
+  if (!m) return {};
+  const local = Number(m[1]);
+  const total = Number(m[2]);
+  if (Number.isNaN(local) || Number.isNaN(total)) return {};
+  return { local, total };
+}
+
 // --- Scan lookups ---
 
 async function lookupOnePieceCard(name: string, number: string | null, apiKey: string): Promise<any> {
@@ -256,24 +312,63 @@ async function lookupOnePieceCard(name: string, number: string | null, apiKey: s
 }
 
 async function lookupPokemonCardViaTCGdex(name: string, number: string | null): Promise<any> {
-  // Strategy:
-  // 1. If we have number and set-like info later, we could hit /sets/{set}/{localId}.
-  // 2. For now, use a broad /cards listing + in-memory filter by name and localId prefix.
-  //    This keeps the implementation simple; we can refine once you see real OCR outputs.
-
-  const res = await fetch(`${TCGDEX_BASE}/cards`);
-  if (!res.ok) throw new Error(`TCGdex cards list failed (${res.status})`);
-  const cards = (await res.json()) as any[];
+  await ensureTCGDexCacheLoaded();
+  if (!tcgdexCards || !tcgdexSets) throw new Error("TCGdex cache not loaded");
 
   const normalizedName = name.toLowerCase();
+  const { local, total } = parsePokemonCollectorNumber(number);
 
-  let filtered = cards.filter((c) => typeof c.name === "string" && c.name.toLowerCase() === normalizedName);
-  if (number) {
-    const numTrim = number.trim();
-    filtered = filtered.filter((c) => typeof c.localId === "string" && numTrim.startsWith(String(c.localId)));
+  // 1. Start from cards whose name matches.
+  let candidates = tcgdexCards.filter(
+    (c) => typeof c.name === "string" && c.name.toLowerCase() === normalizedName
+  );
+
+  // If no exact name match, fall back to substring to be more forgiving.
+  if (candidates.length === 0) {
+    candidates = tcgdexCards.filter(
+      (c) => typeof c.name === "string" && c.name.toLowerCase().includes(normalizedName)
+    );
   }
 
-  const cardResume = filtered[0] ?? cards.find((c) => typeof c.name === "string" && c.name.toLowerCase().includes(normalizedName));
+  if (candidates.length === 0) {
+    console.log("[tcgdex] no candidates for name:", normalizedName, "number:", number);
+    return null;
+  }
+
+  // 2. If we have a local and total, use both.
+  if (local && total) {
+    // Find sets whose total card count matches the denominator on the card.
+    const matchingSetIds = new Set(
+      tcgdexSets
+        .filter((s) => s.cardCount && s.cardCount.total === total)
+        .map((s) => s.id)
+    );
+
+    const narrowed = candidates.filter((c) => {
+      const setId = c.set?.id;
+      const localId = c.localId;
+      if (!setId || !matchingSetIds.has(setId)) return false;
+      if (localId === undefined || localId === null) return false;
+      return String(localId) === String(local);
+    });
+
+    if (narrowed.length === 1) {
+      candidates = narrowed;
+    } else if (narrowed.length > 1) {
+      console.log(
+        "[tcgdex] multiple candidates after set+local filter, picking first",
+        { name: normalizedName, number, narrowed: narrowed.map((c) => c.id) }
+      );
+      candidates = narrowed;
+    } else {
+      console.log(
+        "[tcgdex] no candidates after set+local filter, falling back to name-only",
+        { name: normalizedName, number }
+      );
+    }
+  }
+
+  const cardResume = candidates[0];
   if (!cardResume) return null;
 
   const cardId = cardResume.id as string;
@@ -400,7 +495,7 @@ router.get("/search", async (req, res) => {
 // POST /identify-card
 // Pipeline: OCR first, then route by game:
 // - Pokemon  -> TCGdex (free, card + price + image)
-// - One Piece -> PokéWallet (paid, but only for confident scans)
+// - One Piece -> PokeWallet (paid, but only for confident scans)
 router.post("/identify-card", upload.single("image"), async (req, res) => {
   if (!req.file) { res.status(400).json({ error: "No image provided" }); return; }
   try {
