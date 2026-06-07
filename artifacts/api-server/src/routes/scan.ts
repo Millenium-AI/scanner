@@ -14,13 +14,13 @@ async function ocrCard(imageBase64: string, mimeType: string): Promise<{ name: s
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "google/gemini-2.0-flash-lite-001",
+      model: "google/gemini-2.5-flash-lite",
       messages: [{
         role: "user",
         content: [
           {
             type: "text",
-            text: `You are a Pok\u00e9mon TCG card reader. Your ONLY job is to read text printed on the card.\n\nLook at the card image and find:\n1. The card NAME (top of card, e.g. "Charizard ex", "Flygon ex", "Pikachu")\n2. The COLLECTOR NUMBER (bottom of card, e.g. "222/198", "4/102", "148/165")\n\nRespond with ONLY valid JSON, nothing else:\n{"name":"Charizard ex","number":"222/198","confidence":0.95}\n\nStrict rules:\n- Only output the JSON object, no explanation, no markdown\n- "name" = exact name text at the top of the card\n- "number" = the X/Y number at the bottom (e.g. "222/198")\n- If you genuinely cannot read a field, use null\n- "confidence" = 0.0 to 1.0 based on how clearly you can read the text\n- NEVER invent or guess values you cannot see`
+            text: `You are a Pokémon TCG card reader. Your ONLY job is to read text printed on the card.\n\nLook at the card image and find:\n1. The card NAME (top of card, e.g. "Charizard ex", "Flygon ex", "Pikachu")\n2. The COLLECTOR NUMBER (bottom of card, e.g. "222/198", "4/102", "148/165")\n\nRespond with ONLY valid JSON, nothing else:\n{"name":"Charizard ex","number":"222/198","confidence":0.95}\n\nStrict rules:\n- Only output the JSON object, no explanation, no markdown\n- "name" = exact name text at the top of the card\n- "number" = the X/Y number at the bottom (e.g. "222/198")\n- If you genuinely cannot read a field, use null\n- "confidence" = 0.0 to 1.0 based on how clearly you can read the text\n- NEVER invent or guess values you cannot see`
           },
           {
             type: "image_url",
@@ -66,7 +66,7 @@ async function lookupCard(name: string, number: string | null): Promise<any> {
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Pok\u00e9Wallet search failed (${res.status}): ${err}`);
+    throw new Error(`PokéWallet search failed (${res.status}): ${err}`);
   }
 
   const data = await res.json() as any;
