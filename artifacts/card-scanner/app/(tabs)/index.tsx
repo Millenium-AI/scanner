@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -39,10 +40,44 @@ if (Platform.OS !== "web") {
 type ScanState = "idle" | "scanning" | "success" | "error";
 
 const CONFIDENCE_THRESHOLD = 0.85;
-// Auto-scan fires every 6s — reduces API calls ~3x vs 2s
 const AUTO_SCAN_INTERVAL_MS = 6000;
-// After a failed/low-confidence auto-scan, wait this long before retrying
 const AUTO_SCAN_BACKOFF_MS = 8000;
+
+// ─── List Dropdown (shared) ───────────────────────────────────────────────────
+function ListDropdown({ colors, onClose }: { colors: any; onClose: () => void }) {
+  const { lists, activeScanListId, setActiveScanListId } = useScanContext();
+  const insets = useSafeAreaInsets();
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={ddStyles.overlay} onPress={onClose}>
+        <View style={[ddStyles.menu, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[ddStyles.menuTitle, { color: colors.mutedForeground }]}>SCAN TO LIST</Text>
+          {lists.map((list) => {
+            const active = list.id === activeScanListId;
+            return (
+              <Pressable
+                key={list.id}
+                style={[ddStyles.item, active && { backgroundColor: colors.surface }]}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setActiveScanListId(list.id);
+                  onClose();
+                }}
+              >
+                <View style={[ddStyles.dot, { backgroundColor: list.color }]} />
+                <Text style={[ddStyles.itemText, { color: active ? colors.foreground : colors.mutedForeground }]}>
+                  {list.name}
+                </Text>
+                {active && <Ionicons name="checkmark" size={16} color={colors.accent} />}
+              </Pressable>
+            );
+          })}
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
 
 // ─── Web version ─────────────────────────────────────────────────────────────
 function WebScannerScreen() {
@@ -52,6 +87,7 @@ function WebScannerScreen() {
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [resultCard, setResultCard] = useState<CardScanResult | null>(null);
   const [showResult, setShowResult] = useState(false);
+  const [showListDrop, setShowListDrop] = useState(false);
   const { lists, activeScanListId } = useScanContext();
   const activeList = lists.find((l) => l.id === activeScanListId);
   const topPad = 67;
@@ -94,12 +130,16 @@ function WebScannerScreen() {
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
       <View style={styles.header}>
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>Scanner</Text>
-        <View style={[styles.listBadge, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <Pressable
+          style={[styles.listBadge, { backgroundColor: colors.surface, borderColor: activeList?.color ?? colors.accent }]}
+          onPress={() => setShowListDrop(true)}
+        >
           <View style={[styles.listDot, { backgroundColor: activeList?.color ?? colors.accent }]} />
-          <Text style={[styles.listBadgeText, { color: colors.mutedForeground }]}>
-            {activeList?.name ?? "My Scans"}
+          <Text style={[styles.listBadgeText, { color: colors.foreground }]}>
+            {activeList?.name ?? "My Lists"}
           </Text>
-        </View>
+          <Ionicons name="chevron-down" size={12} color={colors.mutedForeground} />
+        </Pressable>
       </View>
 
       <View style={styles.scanArea}>
@@ -111,7 +151,7 @@ function WebScannerScreen() {
           {scanState === "scanning" ? (
             <>
               <ActivityIndicator size="large" color={colors.accent} />
-              <Text style={[styles.frameHint, { color: colors.mutedForeground }]}>Identifying card…</Text>
+              <Text style={[styles.frameHint, { color: colors.mutedForeground }]}>Identifying card\u2026</Text>
             </>
           ) : (
             <>
@@ -138,7 +178,6 @@ function WebScannerScreen() {
           <Ionicons name="camera" size={22} color={colors.background} />
           <Text style={[styles.captureBtnText, { color: colors.background }]}>Take Photo</Text>
         </Pressable>
-
         <Pressable
           style={({ pressed }) => [
             styles.uploadBtn,
@@ -151,6 +190,8 @@ function WebScannerScreen() {
           <Text style={[styles.uploadBtnText, { color: colors.mutedForeground }]}>Upload Photo</Text>
         </Pressable>
       </View>
+
+      {showListDrop && <ListDropdown colors={colors} onClose={() => setShowListDrop(false)} />}
 
       <CardResultSheet
         visible={showResult}
@@ -172,22 +213,18 @@ function NativeScannerScreen() {
   const [resultCard, setResultCard] = useState<CardScanResult | null>(null);
   const [showResult, setShowResult] = useState(false);
   const [flash, setFlash] = useState<"on" | "off">("off");
+  const [showListDrop, setShowListDrop] = useState(false);
   const { lists, activeScanListId } = useScanContext();
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const [permission, requestPermission] = useCameraPermissions!();
   const activeList = lists.find((l) => l.id === activeScanListId);
 
-  // Refs for interval closure — avoids stale state
   const scanStateRef = useRef<ScanState>("idle");
   const showResultRef = useRef(false);
-  // Inflight lock — prevents concurrent auto-scan requests
   const inflightRef = useRef(false);
-  // Backoff timestamp — after a miss, skip ticks until this time
   const backoffUntilRef = useRef<number>(0);
 
-  const [frameLayout, setFrameLayout] = useState<{
-    x: number; y: number; width: number; height: number;
-  } | null>(null);
+  const [frameLayout, setFrameLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
   useEffect(() => { scanStateRef.current = scanState; }, [scanState]);
   useEffect(() => { showResultRef.current = showResult; }, [showResult]);
@@ -213,7 +250,6 @@ function NativeScannerScreen() {
     try {
       const card = await identifyCard(uri);
       if (auto && typeof (card as any).confidence === "number" && (card as any).confidence < CONFIDENCE_THRESHOLD) {
-        // Low confidence — apply backoff before next auto attempt
         backoffUntilRef.current = Date.now() + AUTO_SCAN_BACKOFF_MS;
         setScanState("idle");
         return;
@@ -224,7 +260,6 @@ function NativeScannerScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err: unknown) {
       if (auto) {
-        // Error on auto-scan — apply backoff
         backoffUntilRef.current = Date.now() + AUTO_SCAN_BACKOFF_MS;
         setScanState("idle");
       } else {
@@ -238,10 +273,8 @@ function NativeScannerScreen() {
     }
   }, []);
 
-  // ── Auto-scan interval (6s, with inflight lock + backoff) ─────────────────
   useEffect(() => {
     const interval = setInterval(async () => {
-      // Skip if: result showing, already scanning, request in flight, or in backoff window
       if (showResultRef.current) return;
       if (scanStateRef.current !== "idle") return;
       if (inflightRef.current) return;
@@ -250,10 +283,7 @@ function NativeScannerScreen() {
 
       inflightRef.current = true;
       try {
-        const photo = await (cameraRef.current as any).takePictureAsync({
-          quality: 0.7,   // Lower quality = smaller payload = cheaper + faster
-          base64: false,
-        });
+        const photo = await (cameraRef.current as any).takePictureAsync({ quality: 0.7, base64: false });
         if (photo?.uri) await runIdentify(photo.uri, true);
         else inflightRef.current = false;
       } catch {
@@ -267,10 +297,7 @@ function NativeScannerScreen() {
     if (scanState === "scanning" || !cameraRef.current) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const photo = await (cameraRef.current as any).takePictureAsync({
-        quality: 0.85,
-        base64: false,
-      });
+      const photo = await (cameraRef.current as any).takePictureAsync({ quality: 0.85, base64: false });
       if (photo?.uri) await runIdentify(photo.uri, false);
     } catch {
       setScanState("error");
@@ -337,12 +364,17 @@ function NativeScannerScreen() {
         </View>
       )}
 
+      {/* Header with tappable list dropdown */}
       <View style={[styles.nativeHeader, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.nativeHeaderTitle}>Scan Card</Text>
-        <View style={styles.listBadgeDark}>
+        <Pressable
+          style={styles.listBadgeDark}
+          onPress={() => setShowListDrop(true)}
+        >
           <View style={[styles.listDot, { backgroundColor: activeList?.color ?? colors.accent }]} />
-          <Text style={styles.listBadgeDarkText}>{activeList?.name ?? "My Scans"}</Text>
-        </View>
+          <Text style={styles.listBadgeDarkText}>{activeList?.name ?? "My Lists"}</Text>
+          <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.6)" />
+        </Pressable>
       </View>
 
       <View style={styles.frameOverlay} pointerEvents="none">
@@ -356,9 +388,9 @@ function NativeScannerScreen() {
           <View style={[styles.corner, styles.cornerBR, { borderColor: colors.accent }]} />
         </Animated.View>
         <Text style={styles.nativeHint}>
-          {scanState === "scanning" ? "Identifying…" :
+          {scanState === "scanning" ? "Identifying\u2026" :
             scanState === "error" ? errorMsg :
-            "Hold card steady — scanning automatically"}
+            "Hold card steady \u2014 scanning automatically"}
         </Text>
       </View>
 
@@ -366,7 +398,6 @@ function NativeScannerScreen() {
         <Pressable style={styles.nativeUpload} onPress={handleUpload} disabled={scanState === "scanning"}>
           <Ionicons name="image-outline" size={22} color="rgba(255,255,255,0.7)" />
         </Pressable>
-
         <Pressable
           style={({ pressed }) => [styles.nativeCapture, { opacity: pressed || scanState === "scanning" ? 0.8 : 1 }]}
           onPress={handleCapture}
@@ -381,11 +412,7 @@ function NativeScannerScreen() {
             </View>
           </View>
         </Pressable>
-
-        <Pressable
-          style={styles.nativeUpload}
-          onPress={() => setFlash(f => f === "off" ? "on" : "off")}
-        >
+        <Pressable style={styles.nativeUpload} onPress={() => setFlash(f => f === "off" ? "on" : "off")}>
           <Ionicons
             name={flash === "on" ? "flash" : "flash-off"}
             size={22}
@@ -393,6 +420,8 @@ function NativeScannerScreen() {
           />
         </Pressable>
       </View>
+
+      {showListDrop && <ListDropdown colors={colors} onClose={() => setShowListDrop(false)} />}
 
       <CardResultSheet
         visible={showResult}
@@ -418,17 +447,12 @@ const styles = StyleSheet.create({
 
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 20 },
   headerTitle: { fontSize: 26, fontFamily: "Poppins_700Bold" },
-  listBadge: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1 },
-  listBadgeText: { fontSize: 12, fontFamily: "Poppins_500Medium" },
+  listBadge: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5 },
+  listBadgeText: { fontSize: 12, fontFamily: "Poppins_600SemiBold" },
   listDot: { width: 8, height: 8, borderRadius: 4 },
 
   scanArea: { flex: 1, alignItems: "center", justifyContent: "center" },
-  cardFrame: {
-    width: FRAME_W, height: FRAME_H,
-    borderRadius: 16, borderWidth: 1,
-    alignItems: "center", justifyContent: "center", gap: 14,
-    position: "relative",
-  },
+  cardFrame: { width: FRAME_W, height: FRAME_H, borderRadius: 16, borderWidth: 1, alignItems: "center", justifyContent: "center", gap: 14, position: "relative" },
   cameraIcon: { width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center" },
   frameHint: { fontSize: 13, fontFamily: "Poppins_400Regular", textAlign: "center", paddingHorizontal: 24 },
 
@@ -440,22 +464,12 @@ const styles = StyleSheet.create({
 
   dimRegion: { position: "absolute", backgroundColor: "rgba(0,0,0,0.55)" },
 
-  nativeHeader: {
-    position: "absolute", top: 0, left: 0, right: 0,
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 20, paddingBottom: 12, zIndex: 10,
-  },
+  nativeHeader: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 12, zIndex: 10 },
   nativeHeaderTitle: { color: "#fff", fontSize: 22, fontFamily: "Poppins_700Bold" },
-  listBadgeDark: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.12)" },
-  listBadgeDarkText: { color: "rgba(255,255,255,0.9)", fontSize: 12, fontFamily: "Poppins_500Medium" },
+  listBadgeDark: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.12)" },
+  listBadgeDarkText: { color: "rgba(255,255,255,0.9)", fontSize: 12, fontFamily: "Poppins_600SemiBold" },
 
-  frameOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 20,
-    pointerEvents: "none" as "none",
-  },
+  frameOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 20, pointerEvents: "none" as "none" },
   scanBox: { width: FRAME_W, height: FRAME_H, position: "relative" },
   nativeHint: { color: "rgba(255,255,255,0.85)", fontSize: 13, fontFamily: "Poppins_400Regular", textAlign: "center", paddingHorizontal: 40 },
 
@@ -465,11 +479,7 @@ const styles = StyleSheet.create({
   cornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 6 },
   cornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 6 },
 
-  nativeBottom: {
-    position: "absolute", bottom: 0, left: 0, right: 0,
-    flexDirection: "row", alignItems: "center", justifyContent: "space-around",
-    paddingHorizontal: 40,
-  },
+  nativeBottom: { position: "absolute", bottom: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingHorizontal: 40 },
   nativeUpload: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
   nativeCapture: { alignItems: "center", justifyContent: "center" },
   nativeCaptureRing: { width: 80, height: 80, borderRadius: 40, borderWidth: 3, alignItems: "center", justifyContent: "center" },
@@ -482,4 +492,13 @@ const styles = StyleSheet.create({
   permBtnText: { fontSize: 16, fontFamily: "Poppins_600SemiBold" },
   uploadLink: { marginTop: 12, padding: 8 },
   uploadLinkText: { fontSize: 14, fontFamily: "Poppins_400Regular", textDecorationLine: "underline" },
+});
+
+const ddStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", paddingHorizontal: 24 },
+  menu: { width: "100%", borderRadius: 18, borderWidth: 1, paddingVertical: 8, overflow: "hidden" },
+  menuTitle: { fontSize: 10, fontFamily: "Poppins_500Medium", textTransform: "uppercase", letterSpacing: 1, paddingHorizontal: 18, paddingVertical: 10 },
+  item: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 18, paddingVertical: 14 },
+  dot: { width: 10, height: 10, borderRadius: 5 },
+  itemText: { flex: 1, fontSize: 15, fontFamily: "Poppins_500Medium" },
 });

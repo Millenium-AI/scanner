@@ -12,13 +12,13 @@ import { useColors } from "@/hooks/useColors";
 function NativeTabLayout() {
   return (
     <NativeTabs>
+      <NativeTabs.Trigger name="scans">
+        <Icon sf={{ default: "list.bullet.rectangle", selected: "list.bullet.rectangle.fill" }} />
+        <Label>Lists</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="index">
         <Icon sf={{ default: "camera.viewfinder", selected: "camera.viewfinder" }} />
         <Label>Scan</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="scans">
-        <Icon sf={{ default: "list.bullet.rectangle", selected: "list.bullet.rectangle.fill" }} />
-        <Label>Scans</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="collection">
         <Icon sf={{ default: "square.stack.3d.up", selected: "square.stack.3d.up.fill" }} />
@@ -60,6 +60,18 @@ function ClassicTabLayout() {
       }}
     >
       <Tabs.Screen
+        name="scans"
+        options={{
+          title: "Lists",
+          tabBarIcon: ({ color }) =>
+            isIOS ? (
+              <SymbolView name="list.bullet.rectangle" tintColor={color} size={24} />
+            ) : (
+              <Ionicons name="list-outline" size={24} color={color} />
+            ),
+        }}
+      />
+      <Tabs.Screen
         name="index"
         options={{
           title: "Scan",
@@ -68,18 +80,6 @@ function ClassicTabLayout() {
               <SymbolView name="camera.viewfinder" tintColor={color} size={24} />
             ) : (
               <Ionicons name="scan-outline" size={24} color={color} />
-            ),
-        }}
-      />
-      <Tabs.Screen
-        name="scans"
-        options={{
-          title: "Scans",
-          tabBarIcon: ({ color }) =>
-            isIOS ? (
-              <SymbolView name="list.bullet.rectangle" tintColor={color} size={24} />
-            ) : (
-              <Ionicons name="list-outline" size={24} color={color} />
             ),
         }}
       />
