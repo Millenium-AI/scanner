@@ -5,6 +5,7 @@ const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 const POKEWALLET_BASE = "https://api.pokewallet.io";
+const TCGDEX_BASE = "https://api.tcgdex.net/v2/en";
 
 // --- Helpers ---
 
@@ -40,7 +41,7 @@ function setCache(key: string, data: any[]) {
 
 // --- PokeWallet result mappers ---
 
-function mapPokemonResult(card: any): any {
+function mapPokemonResultFromPokeWallet(card: any): any {
   const info = card.card_info;
   const tcg = card.tcgplayer;
   const cardId: string = card.id;
@@ -87,6 +88,40 @@ function mapOnePieceResult(card: any): any {
   };
 }
 
+// --- TCGdex (Pokemon) mapper ---
+
+function mapPokemonResultFromTCGdex(card: any): any {
+  const cardId: string = card.id; // e.g. "swsh3-136"
+  const pricing = card.pricing ?? {};
+  const tcg = pricing.tcgplayer ?? {};
+  const cm = pricing.cardmarket ?? {};
+
+  const tcgNormal = tcg.normal ?? tcg.holofoil ?? tcg["reverse-holofoil"] ?? {};
+  const marketValue: number | undefined =
+    typeof tcgNormal.marketPrice === "number"
+      ? tcgNormal.marketPrice
+      : typeof cm.avg === "number"
+        ? cm.avg
+        : undefined;
+
+  const imageBare: string | undefined = card.image; // e.g. https://assets.tcgdex.net/en/base/base1/1
+  const imageUrl = imageBare ? `${imageBare}/high/webp` : undefined;
+
+  return {
+    cardId,
+    name: card.name,
+    set: card.set?.name ?? "",
+    number: card.localId ?? null,
+    rarity: card.rarity ?? null,
+    game: "Pokemon",
+    imageUrl,
+    tcg_url: null,
+    marketValue,
+    foilType: null,
+    confidence: 1.0,
+  };
+}
+
 // --- OCR ---
 
 async function ocrCard(
@@ -106,15 +141,27 @@ async function ocrCard(
         content: [
           {
             type: "text",
-            text: `You are a TCG card reader. Find:
-1. Card NAME (top of card)
-2. COLLECTOR NUMBER (Pokemon: e.g. "222/198"; One Piece: e.g. "OP01-001")
-3. GAME: "Pokemon", "One Piece", "Magic: The Gathering", "Yu-Gi-Oh!", or "Sports"
+            text: `You are a TCG card reader.
 
-Respond ONLY with valid JSON, no markdown:
+From the image, determine:
+1. Card NAME (top of card)
+2. COLLECTOR NUMBER
+   - Pokemon: typically like "215/197", "001/165", etc.
+   - One Piece: like "OP01-001", "OP05-060", etc.
+3. GAME: must be EXACTLY one of "Pokemon" or "One Piece".
+
+Use card layout cues:
+- Pokemon collector number is usually bottom-left of the artwork frame.
+- One Piece collector number is usually bottom-right.
+
+Respond ONLY with strict JSON, no markdown:
 {"name":"Charizard ex","number":"215/197","game":"Pokemon","confidence":0.95}
 
-Rules: JSON only, use null if unreadable, NEVER guess.`,
+Rules:
+- JSON only.
+- Use null for name/number if unreadable.
+- NEVER guess the game; if truly unclear, set "game":"Pokemon" only if the layout clearly matches Pokemon, otherwise "One Piece" if it clearly matches that layout.
+- confidence is a number between 0 and 1 indicating how sure you are.`,
           },
           { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
         ],
@@ -191,7 +238,7 @@ function detectRectangleInBuffer(buffer: Buffer): boolean {
   return true;
 }
 
-// --- Scan lookups (1 PokeWallet call per scan) ---
+// --- Scan lookups ---
 
 async function lookupOnePieceCard(name: string, number: string | null, apiKey: string): Promise<any> {
   const queries = number ? [number, name] : [name];
@@ -208,23 +255,45 @@ async function lookupOnePieceCard(name: string, number: string | null, apiKey: s
   return null;
 }
 
-async function lookupPokemonCard(name: string, number: string | null, apiKey: string): Promise<any> {
-  const query = number ? `${name} ${number}` : name;
-  const res = await fetch(
-    `${POKEWALLET_BASE}/search?q=${encodeURIComponent(query)}&limit=5`,
-    { headers: { ...pokeHeaders(apiKey), "Content-Type": "application/json" } }
-  );
-  if (!res.ok) throw new Error(`PokeWallet search failed (${res.status})`);
-  const data = (await res.json()) as any;
-  if (!data.results?.length) return null;
-  return mapPokemonResult(data.results[0]);
+async function lookupPokemonCardViaTCGdex(name: string, number: string | null): Promise<any> {
+  // Strategy:
+  // 1. If we have number and set-like info later, we could hit /sets/{set}/{localId}.
+  // 2. For now, use a broad /cards listing + in-memory filter by name and localId prefix.
+  //    This keeps the implementation simple; we can refine once you see real OCR outputs.
+
+  const res = await fetch(`${TCGDEX_BASE}/cards`);
+  if (!res.ok) throw new Error(`TCGdex cards list failed (${res.status})`);
+  const cards = (await res.json()) as any[];
+
+  const normalizedName = name.toLowerCase();
+
+  let filtered = cards.filter((c) => typeof c.name === "string" && c.name.toLowerCase() === normalizedName);
+  if (number) {
+    const numTrim = number.trim();
+    filtered = filtered.filter((c) => typeof c.localId === "string" && numTrim.startsWith(String(c.localId)));
+  }
+
+  const cardResume = filtered[0] ?? cards.find((c) => typeof c.name === "string" && c.name.toLowerCase().includes(normalizedName));
+  if (!cardResume) return null;
+
+  const cardId = cardResume.id as string;
+  const fullRes = await fetch(`${TCGDEX_BASE}/cards/${encodeURIComponent(cardId)}`);
+  if (!fullRes.ok) throw new Error(`TCGdex card fetch failed (${fullRes.status})`);
+  const fullCard = await fullRes.json();
+  return mapPokemonResultFromTCGdex(fullCard);
 }
 
 async function lookupCard(name: string, number: string | null, game: string): Promise<any> {
   const apiKey = process.env.POKEWALLET_API_KEY;
-  if (!apiKey) throw new Error("POKEWALLET_API_KEY is not set");
-  if (game.toLowerCase() === "one piece") return lookupOnePieceCard(name, number, apiKey);
-  return lookupPokemonCard(name, number, apiKey);
+  const normalized = game.toLowerCase();
+
+  if (normalized === "one piece") {
+    if (!apiKey) throw new Error("POKEWALLET_API_KEY is not set for One Piece lookups");
+    return lookupOnePieceCard(name, number, apiKey);
+  }
+
+  // Default: treat as Pokemon and use free TCGdex
+  return lookupPokemonCardViaTCGdex(name, number);
 }
 
 // --- Price refresh ---
@@ -252,7 +321,7 @@ async function lookupPriceById(cardId: string): Promise<{ cardId: string; market
 
 // --- Routes ---
 
-// GET /card-image/:id — proxies PokeWallet images server-side
+// GET /card-image/:id — proxies PokeWallet images server-side (One Piece + any legacy Pokemon)
 router.get("/card-image/:id", async (req, res) => {
   const apiKey = process.env.POKEWALLET_API_KEY;
   if (!apiKey) { res.status(500).json({ error: "API key not configured" }); return; }
@@ -275,7 +344,7 @@ router.get("/card-image/:id", async (req, res) => {
 
 // POST /detect-rectangle
 // Called by the client every 3 seconds before deciding to run OCR.
-// Returns { hasRectangle: boolean } — no OCR or PokeWallet calls are made here.
+// Returns { hasRectangle: boolean } — no OCR or PokeWallet/TCGdex calls are made here.
 router.post("/detect-rectangle", upload.single("image"), (req, res) => {
   if (!req.file) { res.status(400).json({ error: "No image provided" }); return; }
   const hasRectangle = detectRectangleInBuffer(req.file.buffer);
@@ -284,6 +353,8 @@ router.post("/detect-rectangle", upload.single("image"), (req, res) => {
 });
 
 // GET /search?q=charizard&game=pokemon&limit=20
+// NOTE: This endpoint still uses PokéWallet for search UI features. The
+// scanner itself uses /identify-card which now routes Pokemon -> TCGdex.
 router.get("/search", async (req, res) => {
   const apiKey = process.env.POKEWALLET_API_KEY;
   if (!apiKey) { res.status(500).json({ error: "POKEWALLET_API_KEY not set" }); return; }
@@ -316,7 +387,7 @@ router.get("/search", async (req, res) => {
       );
       if (!upstream.ok) { res.status(upstream.status).json({ error: "Search failed" }); return; }
       const data = (await upstream.json()) as any;
-      const results = (data.results ?? []).map(mapPokemonResult);
+      const results = (data.results ?? []).map(mapPokemonResultFromPokeWallet);
       setCache(cacheKey, results);
       res.json(results);
     }
@@ -327,8 +398,9 @@ router.get("/search", async (req, res) => {
 });
 
 // POST /identify-card
-// Pipeline: OCR first, then PokeWallet ONLY if OCR confidence >= 0.75 and name is readable.
-// This prevents wasted PokeWallet API calls on blurry or low-quality frames.
+// Pipeline: OCR first, then route by game:
+// - Pokemon  -> TCGdex (free, card + price + image)
+// - One Piece -> PokéWallet (paid, but only for confident scans)
 router.post("/identify-card", upload.single("image"), async (req, res) => {
   if (!req.file) { res.status(400).json({ error: "No image provided" }); return; }
   try {
@@ -341,11 +413,10 @@ router.post("/identify-card", upload.single("image"), async (req, res) => {
       return;
     }
 
-    // Gate 2: Confidence must meet the threshold before calling PokeWallet.
-    // Raised from 0.6 to 0.75 to reduce low-quality PokeWallet calls.
-    const OCR_POKEWALLET_THRESHOLD = 0.75;
-    if (ocr.confidence < OCR_POKEWALLET_THRESHOLD) {
-      console.log(`[identify-card] OCR confidence ${ocr.confidence} below threshold ${OCR_POKEWALLET_THRESHOLD} — skipping PokeWallet`);
+    // Gate 2: Confidence must meet the threshold before any external lookup.
+    const OCR_EXTERNAL_THRESHOLD = 0.75;
+    if (ocr.confidence < OCR_EXTERNAL_THRESHOLD) {
+      console.log(`[identify-card] OCR confidence ${ocr.confidence} below threshold ${OCR_EXTERNAL_THRESHOLD} — skipping external lookups`);
       res.status(422).json({ error: "Could not read card clearly", confidence: ocr.confidence });
       return;
     }
@@ -356,7 +427,6 @@ router.post("/identify-card", upload.single("image"), async (req, res) => {
       return;
     }
 
-    // All gates passed — call PokeWallet
     const card = await lookupCard(ocr.name, ocr.number, ocr.game);
     if (!card) {
       res.json({
