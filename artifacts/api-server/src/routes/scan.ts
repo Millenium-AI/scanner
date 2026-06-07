@@ -14,7 +14,7 @@ async function ocrCard(imageBase64: string, mimeType: string): Promise<{ name: s
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "google/gemini-2.0-flash-001",
+      model: "openai/gpt-4o-mini",
       messages: [{
         role: "user",
         content: [
@@ -40,7 +40,6 @@ async function ocrCard(imageBase64: string, mimeType: string): Promise<{ name: s
   }
 
   const raw = data.choices[0].message.content.trim();
-  // Strip markdown code fences if model wraps in ```json
   const cleaned = raw.replace(/^```[\w]*\n?/, "").replace(/\n?```$/, "").trim();
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error(`Could not parse OCR response: ${raw}`);
