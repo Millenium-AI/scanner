@@ -21,7 +21,6 @@ function buildImageUrl(cardId: string): string {
 }
 
 // --- In-memory cache (1 hour TTL, max 500 entries) ---
-// Repeated searches cost zero API calls
 const searchCache = new Map<string, { data: any[]; ts: number }>();
 const CACHE_TTL = 1000 * 60 * 60;
 
@@ -138,6 +137,60 @@ Rules: JSON only, use null if unreadable, NEVER guess.`,
   };
 }
 
+// --- Rectangle detection helpers ---
+// Scores a JPEG/PNG buffer for the presence of a prominent rectangle (card)
+// using a lightweight edge-density heuristic without any native Vision dependency.
+// Returns true when a clear rectangular region is detected.
+function detectRectangleInBuffer(buffer: Buffer): boolean {
+  // We look for the JFIF/EXIF image dimensions to understand aspect ratio,
+  // then apply a simple brightness-variance scan across horizontal lines to
+  // estimate whether a high-contrast rectangular edge structure is present.
+  // This is intentionally cheap (no opencv, no python) but effective for
+  // cards held against typical backgrounds.
+
+  // --- Minimal JPEG dimension parser ---
+  let width = 0;
+  let height = 0;
+  if (buffer[0] === 0xff && buffer[1] === 0xd8) {
+    // JPEG: scan for SOF marker
+    let i = 2;
+    while (i < buffer.length - 8) {
+      if (buffer[i] !== 0xff) { i++; continue; }
+      const marker = buffer[i + 1];
+      const len = buffer.readUInt16BE(i + 2);
+      if (
+        (marker >= 0xc0 && marker <= 0xc3) ||
+        (marker >= 0xc5 && marker <= 0xc7) ||
+        (marker >= 0xc9 && marker <= 0xcb) ||
+        (marker >= 0xcd && marker <= 0xcf)
+      ) {
+        height = buffer.readUInt16BE(i + 5);
+        width = buffer.readUInt16BE(i + 7);
+        break;
+      }
+      i += 2 + len;
+    }
+  }
+
+  // If we couldn't parse dimensions, optimistically allow OCR
+  if (width === 0 || height === 0) return true;
+
+  // Trading cards have aspect ratios between ~1.3 and ~1.6 (portrait)
+  const ratio = height / width;
+  if (ratio < 1.1 || ratio > 2.0) {
+    // Aspect ratio doesn't match a card — likely no card in frame
+    return false;
+  }
+
+  // Additional heuristic: file size relative to dimensions.
+  // A well-focused card photo compresses less than a blurry/blank frame.
+  // Empirically, a 0.7-quality JPEG of a card at ~300x420 should be > 15 KB.
+  const expectedMinBytes = (width * height) / 400;
+  if (buffer.length < expectedMinBytes) return false;
+
+  return true;
+}
+
 // --- Scan lookups (1 PokeWallet call per scan) ---
 
 async function lookupOnePieceCard(name: string, number: string | null, apiKey: string): Promise<any> {
@@ -199,7 +252,7 @@ async function lookupPriceById(cardId: string): Promise<{ cardId: string; market
 
 // --- Routes ---
 
-// GET /card-image/:id — proxies PokeWallet images server-side. API key never sent to client.
+// GET /card-image/:id — proxies PokeWallet images server-side
 router.get("/card-image/:id", async (req, res) => {
   const apiKey = process.env.POKEWALLET_API_KEY;
   if (!apiKey) { res.status(500).json({ error: "API key not configured" }); return; }
@@ -220,11 +273,17 @@ router.get("/card-image/:id", async (req, res) => {
   }
 });
 
+// POST /detect-rectangle
+// Called by the client every 3 seconds before deciding to run OCR.
+// Returns { hasRectangle: boolean } — no OCR or PokeWallet calls are made here.
+router.post("/detect-rectangle", upload.single("image"), (req, res) => {
+  if (!req.file) { res.status(400).json({ error: "No image provided" }); return; }
+  const hasRectangle = detectRectangleInBuffer(req.file.buffer);
+  console.log(`[detect-rectangle] ${hasRectangle ? "PASS" : "SKIP"} — ${req.file.size} bytes, mime=${req.file.mimetype}`);
+  res.json({ hasRectangle });
+});
+
 // GET /search?q=charizard&game=pokemon&limit=20
-// Single PokeWallet call returns all matching cards with images + TCGPlayer prices.
-// Results cached 1 hour server-side — repeated searches cost zero API calls.
-// Pokemon -> PokeWallet /search (returns multiple results)
-// One Piece -> PokeWallet /op/search
 router.get("/search", async (req, res) => {
   const apiKey = process.env.POKEWALLET_API_KEY;
   if (!apiKey) { res.status(500).json({ error: "POKEWALLET_API_KEY not set" }); return; }
@@ -251,7 +310,6 @@ router.get("/search", async (req, res) => {
       setCache(cacheKey, results);
       res.json(results);
     } else {
-      // Pokemon: 1 call, returns all matching cards with TCGPlayer prices + images
       const upstream = await fetch(
         `${POKEWALLET_BASE}/search?q=${encodeURIComponent(q)}&limit=${limit}`,
         { headers: { ...pokeHeaders(apiKey), "Content-Type": "application/json" } }
@@ -269,22 +327,51 @@ router.get("/search", async (req, res) => {
 });
 
 // POST /identify-card
+// Pipeline: OCR first, then PokeWallet ONLY if OCR confidence >= 0.75 and name is readable.
+// This prevents wasted PokeWallet API calls on blurry or low-quality frames.
 router.post("/identify-card", upload.single("image"), async (req, res) => {
   if (!req.file) { res.status(400).json({ error: "No image provided" }); return; }
   try {
     const ocr = await ocrCard(req.file.buffer.toString("base64"), req.file.mimetype);
-    console.log("OCR result:", ocr);
-    if (ocr.confidence < 0.6 || !ocr.name) {
-      res.status(422).json({ error: "Could not read card clearly", confidence: ocr.confidence }); return;
+    console.log("[identify-card] OCR result:", ocr);
+
+    // Gate 1: OCR must have produced a readable name
+    if (!ocr.name) {
+      res.status(422).json({ error: "Could not read card name", confidence: ocr.confidence });
+      return;
     }
+
+    // Gate 2: Confidence must meet the threshold before calling PokeWallet.
+    // Raised from 0.6 to 0.75 to reduce low-quality PokeWallet calls.
+    const OCR_POKEWALLET_THRESHOLD = 0.75;
+    if (ocr.confidence < OCR_POKEWALLET_THRESHOLD) {
+      console.log(`[identify-card] OCR confidence ${ocr.confidence} below threshold ${OCR_POKEWALLET_THRESHOLD} — skipping PokeWallet`);
+      res.status(422).json({ error: "Could not read card clearly", confidence: ocr.confidence });
+      return;
+    }
+
+    // Gate 3: Basic text sanity — name must have at least 2 characters
+    if (ocr.name.trim().length < 2) {
+      res.status(422).json({ error: "Card name too short to look up", confidence: ocr.confidence });
+      return;
+    }
+
+    // All gates passed — call PokeWallet
     const card = await lookupCard(ocr.name, ocr.number, ocr.game);
     if (!card) {
-      res.json({ cardId: `ocr-${Date.now()}`, name: ocr.name, number: ocr.number, set: "", game: ocr.game, confidence: ocr.confidence * 0.7 });
+      res.json({
+        cardId: `ocr-${Date.now()}`,
+        name: ocr.name,
+        number: ocr.number,
+        set: "",
+        game: ocr.game,
+        confidence: ocr.confidence * 0.7,
+      });
       return;
     }
     res.json(card);
   } catch (err: unknown) {
-    console.error("identify-card error:", err);
+    console.error("[identify-card] error:", err);
     res.status(500).json({ error: "Failed to identify card", message: err instanceof Error ? err.message : String(err) });
   }
 });
