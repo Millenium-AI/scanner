@@ -66,7 +66,6 @@ async function getOpSetCards(setCode: string, apiKey: string): Promise<any[]> {
     return hit.cards;
   }
   console.log(`[op-set-cache] MISS ${setCode} — fetching from PokéWallet`);
-  // Fetch up to 300 cards per set (most OP sets are ~100-200 cards)
   const res = await fetch(
     `${POKEWALLET_BASE}/op/sets/${encodeURIComponent(setCode)}?limit=300`,
     { headers: pokeHeaders(apiKey) }
@@ -141,7 +140,6 @@ function mapPokemonResultFromPokeWallet(card: any): any {
 function mapOnePieceResult(card: any): any {
   const tcg = card.tcgplayer;
   const cm = card.cardmarket;
-  // Always use the unique ID hash — never fabricate from card_number to avoid key collisions
   const cardId: string = card.id;
   const name: string = card.name;
   const setName: string = card.card_number?.split("-")[0] ?? "";
@@ -154,7 +152,7 @@ function mapOnePieceResult(card: any): any {
     set: setName,
     number,
     rarity: card.rarity ?? null,
-    subType: card.sub_type_name ?? null,   // "Normal" | "Foil" — used for variant filtering
+    subType: card.sub_type_name ?? null,
     game: "One Piece",
     imageUrl: buildProxyImageUrl(cardId),
     tcg_url: tcg?.url ?? null,
@@ -362,7 +360,6 @@ async function lookupPokemonVariantsViaTCGdex(
     if (bySet.length > 0) pool = bySet;
   }
 
-  // Cap at 3 — more than 3 variants is overwhelming and rarely correct
   const fetched = await Promise.all(
     pool.slice(0, 3).map(async (c: any) => {
       try {
@@ -387,23 +384,18 @@ async function lookupOnePieceVariants(
   language: "Japanese" | "English",
   finish: "Foil" | "Normal"
 ): Promise<any[]> {
-  // Parse set code from collector number e.g. "OP06-118" → "OP06"
   const setCode = number?.match(/^([A-Z]{2}\d{2})-/)?.[1] ?? null;
 
   let rawCards: any[] = [];
 
   if (setCode) {
-    // Fetch entire set once — cached for 1 hour
     const allSetCards = await getOpSetCards(setCode, apiKey);
-
-    // Filter to exact card_number match
     rawCards = allSetCards.filter((c: any) =>
       c.card_number?.toUpperCase() === number?.toUpperCase()
     );
     console.log(`[op] ${number} in set ${setCode}: ${rawCards.length} variants before filtering`);
   }
 
-  // Fallback to search if set fetch failed or no number available
   if (rawCards.length === 0) {
     const q = number ?? name;
     const res = await fetch(
@@ -413,7 +405,6 @@ async function lookupOnePieceVariants(
     if (res.ok) {
       const data = (await res.json()) as any;
       rawCards = (data.data ?? []).filter((c: any) =>
-        // Drop junk records — must have a valid OP card_number and a real ID
         c.id &&
         c.name &&
         c.card_number &&
@@ -425,12 +416,8 @@ async function lookupOnePieceVariants(
 
   if (rawCards.length === 0) return [];
 
-  // --- In-memory filtering using OCR signals ---
-
-  // 1. Language filter
   const isJapanese = (c: any): boolean => {
     const n = (c.name ?? "") + (c.clean_name ?? "");
-    // Japanese cards often have "(JP)" in name or purely Japanese characters in clean_name
     return /[\u3040-\u30ff\u4e00-\u9fff]/.test(n) || n.includes("(JP)") || n.includes("Japanese");
   };
 
@@ -446,7 +433,6 @@ async function lookupOnePieceVariants(
     console.log(`[op] language=English → ${filtered.length} variants`);
   }
 
-  // 2. Finish filter (Foil / Normal)
   const foilCards = filtered.filter(c => c.sub_type_name === "Foil");
   const normalCards = filtered.filter(c => c.sub_type_name === "Normal");
 
@@ -458,7 +444,6 @@ async function lookupOnePieceVariants(
     console.log(`[op] finish=Normal → ${filtered.length} variants`);
   }
 
-  // Sort by market value descending so picker shows most valuable first
   filtered.sort((a, b) => {
     const aVal = a.tcgplayer?.prices?.market_price ?? a.cardmarket?.prices?.avg ?? 0;
     const bVal = b.tcgplayer?.prices?.market_price ?? b.cardmarket?.prices?.avg ?? 0;
@@ -547,7 +532,7 @@ router.get("/card-image/:id", async (req, res) => {
 
 router.get("/search", async (req, res) => {
   const apiKey = process.env.POKEWALLET_API_KEY;
-  if (!apiKey) { res.status(500).json({ error: "POKEWALLET_API_KEY not set" }); return; }\
+  if (!apiKey) { res.status(500).json({ error: "POKEWALLET_API_KEY not set" }); return; }
   const q = (req.query.q as string ?? "").trim();
   const game = (req.query.game as string ?? "pokemon").toLowerCase();
   const limit = Math.min(Number(req.query.limit ?? 20), 50);
