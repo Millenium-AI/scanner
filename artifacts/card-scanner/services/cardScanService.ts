@@ -1,4 +1,5 @@
 import { CardScanResult } from "@/context/ScanContext";
+import { ScanFilters } from "@/components/ScanFilterSheet";
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 
@@ -6,7 +7,10 @@ export type IdentifyResult =
   | { type: "single"; card: CardScanResult }
   | { type: "variants"; cards: CardScanResult[] };
 
-export async function identifyCard(imageUri: string): Promise<IdentifyResult> {
+export async function identifyCard(
+  imageUri: string,
+  filters?: ScanFilters
+): Promise<IdentifyResult> {
   const formData = new FormData();
 
   const filename = imageUri.split("/").pop() ?? "scan.jpg";
@@ -19,12 +23,18 @@ export async function identifyCard(imageUri: string): Promise<IdentifyResult> {
     type,
   } as unknown as Blob);
 
+  // Append active filter overrides so the server can skip / override OCR fields
+  if (filters) {
+    if (filters.game)     formData.append("game",     filters.game);
+    if (filters.set)      formData.append("set",      filters.set);
+    if (filters.language) formData.append("language", filters.language);
+    if (filters.finish)   formData.append("finish",   filters.finish);
+  }
+
   const response = await fetch(`${BACKEND_URL}/identify-card`, {
     method: "POST",
     body: formData,
-    headers: {
-      Accept: "application/json",
-    },
+    headers: { Accept: "application/json" },
   });
 
   if (!response.ok) {
@@ -34,7 +44,6 @@ export async function identifyCard(imageUri: string): Promise<IdentifyResult> {
 
   const data = await response.json();
 
-  // Backend returns { variants: [...] } when multiple cards share the same name + number
   if (Array.isArray(data.variants) && data.variants.length > 1) {
     return { type: "variants", cards: data.variants };
   }
