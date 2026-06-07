@@ -20,21 +20,17 @@ interface CardDetailModalProps {
   card: CardScanResult | null;
   visible: boolean;
   onClose: () => void;
-  /** Optional extra info shown below price row (e.g. quantity badge) */
   extraInfo?: React.ReactNode;
 }
 
 function buildEbayUrl(card: CardScanResult): string {
-  // Construct search: name + set (+ number if available)
   const parts = [card.name, card.set];
   if (card.number) parts.push(card.number);
   const q = encodeURIComponent(parts.join(" "));
-  // _nkw = keyword, _sacat=2536 = Trading Card Games
   return `https://www.ebay.com/sch/i.html?_nkw=${q}&_sacat=2536&LH_BIN=1&_sop=12`;
 }
 
 function buildEbayAppUrl(card: CardScanResult): string {
-  // eBay app universal link — falls back to browser if app not installed
   const parts = [card.name, card.set];
   if (card.number) parts.push(card.number);
   const q = encodeURIComponent(parts.join(" "));
@@ -47,8 +43,6 @@ export function CardDetailModal({ card, visible, onClose, extraInfo }: CardDetai
 
   if (!card) return null;
 
-  const hasTcg = !!card.imageUrl; // imageUrl presence correlates with a known TCGPlayer card
-  // We store tcg_url on the scan result when available; fall back to search URL
   const tcgUrl = (card as any).tcg_url
     ? (card as any).tcg_url
     : `https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent(card.name + " " + card.set)}&view=grid`;
@@ -60,18 +54,11 @@ export function CardDetailModal({ card, visible, onClose, extraInfo }: CardDetai
 
   const handleEbay = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    // Try eBay app first, fall back to browser URL
     const appUrl = buildEbayAppUrl(card);
     const webUrl = buildEbayUrl(card);
     const canOpen = await Linking.canOpenURL(appUrl).catch(() => false);
     await Linking.openURL(canOpen ? appUrl : webUrl);
   };
-
-  const priceItems = [
-    { label: "Market", value: card.marketValue, accent: true },
-    { label: "Low", value: card.lowValue, accent: false },
-    { label: "High", value: card.highValue, accent: false },
-  ];
 
   const metaItems = [
     { label: "Set", value: card.set || "—" },
@@ -92,16 +79,11 @@ export function CardDetailModal({ card, visible, onClose, extraInfo }: CardDetai
           onPress={() => {}}
           style={[
             styles.sheet,
-            {
-              backgroundColor: colors.card,
-              paddingBottom: insets.bottom + 16,
-            },
+            { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 },
           ]}
         >
-          {/* Handle */}
           <View style={[styles.handle, { backgroundColor: colors.border }]} />
 
-          {/* Close button */}
           <Pressable style={styles.closeBtn} onPress={onClose} hitSlop={12}>
             <Ionicons name="close" size={20} color={colors.mutedForeground} />
           </Pressable>
@@ -127,25 +109,20 @@ export function CardDetailModal({ card, visible, onClose, extraInfo }: CardDetai
               </View>
             )}
 
-            {/* Name + game tag */}
+            {/* Name + set */}
             <Text style={[styles.cardName, { color: colors.foreground }]}>{card.name}</Text>
             <Text style={[styles.cardSet, { color: colors.mutedForeground }]}>
               {card.set}{card.number ? ` · ${card.number}` : ""}
             </Text>
 
-            {/* Extra info slot */}
             {extraInfo && <View style={styles.extraInfo}>{extraInfo}</View>}
 
-            {/* Price row */}
-            <View style={[styles.priceRow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              {priceItems.map(({ label, value, accent }) => (
-                <View key={label} style={styles.priceCell}>
-                  <Text style={[styles.priceAmount, { color: accent ? colors.accent : colors.foreground }]}>
-                    {value !== undefined ? `$${value.toFixed(2)}` : "—"}
-                  </Text>
-                  <Text style={[styles.priceLabel, { color: colors.mutedForeground }]}>{label}</Text>
-                </View>
-              ))}
+            {/* Market price — single value, full width */}
+            <View style={[styles.marketBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={[styles.marketLabel, { color: colors.mutedForeground }]}>MARKET PRICE</Text>
+              <Text style={[styles.marketValue, { color: colors.accent }]}>
+                {card.marketValue !== undefined ? `$${card.marketValue.toFixed(2)}` : "—"}
+              </Text>
             </View>
 
             {/* Meta grid */}
@@ -184,142 +161,41 @@ export function CardDetailModal({ card, visible, onClose, extraInfo }: CardDetai
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    justifyContent: "flex-end",
-  },
-  sheet: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingTop: 12,
-    maxHeight: "90%",
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    alignSelf: "center",
-    marginBottom: 8,
-  },
-  closeBtn: {
-    position: "absolute",
-    top: 16,
-    right: 18,
-    zIndex: 10,
-    padding: 4,
-  },
-  content: {
-    paddingHorizontal: 20,
-    paddingBottom: 8,
-    alignItems: "center",
-  },
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
+  sheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingTop: 12, maxHeight: "90%" },
+  handle: { width: 36, height: 4, borderRadius: 2, alignSelf: "center", marginBottom: 8 },
+  closeBtn: { position: "absolute", top: 16, right: 18, zIndex: 10, padding: 4 },
+  content: { paddingHorizontal: 20, paddingBottom: 8, alignItems: "center" },
   imageWrapper: {
-    width: 160,
-    height: 224,
-    marginVertical: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    elevation: 10,
+    width: 160, height: 224, marginVertical: 12,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4, shadowRadius: 16, elevation: 10,
   },
-  cardImage: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 10,
-  },
+  cardImage: { width: "100%", height: "100%", borderRadius: 10 },
   imagePlaceholder: {
-    width: 160,
-    height: 224,
-    borderRadius: 10,
-    marginVertical: 12,
-    alignItems: "center",
-    justifyContent: "center",
+    width: 160, height: 224, borderRadius: 10, marginVertical: 12,
+    alignItems: "center", justifyContent: "center",
   },
-  cardName: {
-    fontSize: 22,
-    fontFamily: "Poppins_700Bold",
-    textAlign: "center",
-    marginTop: 4,
+  cardName: { fontSize: 22, fontFamily: "Poppins_700Bold", textAlign: "center", marginTop: 4 },
+  cardSet: { fontSize: 13, fontFamily: "Poppins_400Regular", textAlign: "center", marginBottom: 12 },
+  extraInfo: { marginBottom: 12, alignItems: "center" },
+  marketBox: {
+    width: "100%", borderRadius: 16, borderWidth: 1,
+    paddingVertical: 18, alignItems: "center", marginBottom: 14, gap: 4,
   },
-  cardSet: {
-    fontSize: 13,
-    fontFamily: "Poppins_400Regular",
-    textAlign: "center",
-    marginBottom: 12,
-  },
-  extraInfo: {
-    marginBottom: 12,
-    alignItems: "center",
-  },
-  priceRow: {
-    flexDirection: "row",
-    width: "100%",
-    borderRadius: 16,
-    borderWidth: 1,
-    paddingVertical: 14,
-    marginBottom: 14,
-  },
-  priceCell: {
-    flex: 1,
-    alignItems: "center",
-    gap: 4,
-  },
-  priceAmount: {
-    fontSize: 18,
-    fontFamily: "Poppins_700Bold",
-  },
-  priceLabel: {
-    fontSize: 10,
-    fontFamily: "Poppins_500Medium",
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-  },
+  marketLabel: { fontSize: 10, fontFamily: "Poppins_500Medium", textTransform: "uppercase", letterSpacing: 1 },
+  marketValue: { fontSize: 32, fontFamily: "Poppins_700Bold" },
   metaGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    width: "100%",
-    borderRadius: 14,
-    borderWidth: 1,
-    overflow: "hidden",
-    marginBottom: 20,
+    flexDirection: "row", flexWrap: "wrap", width: "100%",
+    borderRadius: 14, borderWidth: 1, overflow: "hidden", marginBottom: 20,
   },
-  metaCell: {
-    width: "50%",
-    padding: 12,
-    borderBottomWidth: 1,
-    borderRightWidth: 1,
-    gap: 2,
-  },
-  metaLabel: {
-    fontSize: 9,
-    fontFamily: "Poppins_500Medium",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-  },
-  metaValue: {
-    fontSize: 14,
-    fontFamily: "Poppins_600SemiBold",
-  },
-  actionRow: {
-    flexDirection: "row",
-    width: "100%",
-    gap: 12,
-    marginBottom: 4,
-  },
+  metaCell: { width: "50%", padding: 12, borderBottomWidth: 1, borderRightWidth: 1, gap: 2 },
+  metaLabel: { fontSize: 9, fontFamily: "Poppins_500Medium", textTransform: "uppercase", letterSpacing: 0.8 },
+  metaValue: { fontSize: 14, fontFamily: "Poppins_600SemiBold" },
+  actionRow: { flexDirection: "row", width: "100%", gap: 12, marginBottom: 4 },
   actionBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: 14,
+    flex: 1, flexDirection: "row", alignItems: "center",
+    justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: 14,
   },
-  actionBtnText: {
-    fontSize: 15,
-    fontFamily: "Poppins_600SemiBold",
-    color: "#fff",
-  },
+  actionBtnText: { fontSize: 15, fontFamily: "Poppins_600SemiBold", color: "#fff" },
 });
