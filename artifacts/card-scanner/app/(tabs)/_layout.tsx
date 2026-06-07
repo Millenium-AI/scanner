@@ -20,6 +20,10 @@ function NativeTabLayout() {
         <Icon sf={{ default: "camera.viewfinder", selected: "camera.viewfinder" }} />
         <Label>Scan</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="search">
+        <Icon sf={{ default: "magnifyingglass", selected: "magnifyingglass" }} />
+        <Label>Search</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="collection">
         <Icon sf={{ default: "square.stack.3d.up", selected: "square.stack.3d.up.fill" }} />
         <Label>Collection</Label>
@@ -53,10 +57,7 @@ function ClassicTabLayout() {
           ) : isWeb ? (
             <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.card }]} />
           ) : null,
-        tabBarLabelStyle: {
-          fontFamily: "Poppins_500Medium",
-          fontSize: 11,
-        },
+        tabBarLabelStyle: { fontFamily: "Poppins_500Medium", fontSize: 11 },
       }}
     >
       <Tabs.Screen
@@ -64,11 +65,7 @@ function ClassicTabLayout() {
         options={{
           title: "Lists",
           tabBarIcon: ({ color }) =>
-            isIOS ? (
-              <SymbolView name="list.bullet.rectangle" tintColor={color} size={24} />
-            ) : (
-              <Ionicons name="list-outline" size={24} color={color} />
-            ),
+            isIOS ? <SymbolView name="list.bullet.rectangle" tintColor={color} size={24} /> : <Ionicons name="list-outline" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -76,11 +73,15 @@ function ClassicTabLayout() {
         options={{
           title: "Scan",
           tabBarIcon: ({ color }) =>
-            isIOS ? (
-              <SymbolView name="camera.viewfinder" tintColor={color} size={24} />
-            ) : (
-              <Ionicons name="scan-outline" size={24} color={color} />
-            ),
+            isIOS ? <SymbolView name="camera.viewfinder" tintColor={color} size={24} /> : <Ionicons name="scan-outline" size={24} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="search"
+        options={{
+          title: "Search",
+          tabBarIcon: ({ color }) =>
+            isIOS ? <SymbolView name="magnifyingglass" tintColor={color} size={24} /> : <Ionicons name="search-outline" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -88,11 +89,7 @@ function ClassicTabLayout() {
         options={{
           title: "Collection",
           tabBarIcon: ({ color }) =>
-            isIOS ? (
-              <SymbolView name="square.stack.3d.up" tintColor={color} size={24} />
-            ) : (
-              <Ionicons name="albums-outline" size={24} color={color} />
-            ),
+            isIOS ? <SymbolView name="square.stack.3d.up" tintColor={color} size={24} /> : <Ionicons name="albums-outline" size={24} color={color} />,
         }}
       />
     </Tabs>
@@ -100,8 +97,6 @@ function ClassicTabLayout() {
 }
 
 export default function TabLayout() {
-  if (isLiquidGlassAvailable()) {
-    return <NativeTabLayout />;
-  }
-  return <ClassicTabLayout />;
+  if (isLiquidGlassAvailable()) return <NativeTabLayout />;
+  return <ClassicTabLayout />
 }
