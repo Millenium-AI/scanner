@@ -1,10 +1,11 @@
 import * as Haptics from "expo-haptics";
+import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
-  Image,
+  Dimensions,
   Modal,
   Platform,
   Pressable,
@@ -32,31 +33,6 @@ let useCameraPermissions: (() => [
   () => Promise<void>
 ]) | null = null;
 
-// On-device rectangle detection: check if the captured photo has a card-like
-// aspect ratio (portrait 1.28–1.60 or landscape 0.625–0.78).
-// Uses RN's Image.getSize — no server round-trip needed.
-function hasCardAspectRatio(uri: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    Image.getSize(
-      uri,
-      (width, height) => {
-        if (width === 0 || height === 0) { resolve(true); return; }
-        const ratio = height / width;
-        const portrait  = ratio >= 1.28 && ratio <= 1.60;
-        const landscape = ratio >= 0.625 && ratio <= 0.78;
-        const pass = portrait || landscape;
-        console.log(`[rectGate] ${width}x${height} ratio=${ratio.toFixed(3)} pass=${pass}`);
-        resolve(pass);
-      },
-      () => {
-        // getSize failed — allow the frame through so we don't silently drop
-        console.warn("[rectGate] getSize failed, allowing frame");
-        resolve(true);
-      }
-    );
-  });
-}
-
 if (Platform.OS !== "web") {
   const cam = require("expo-camera");
   CameraView = cam.CameraView;
@@ -68,11 +44,48 @@ type ScanState = "idle" | "scanning" | "success" | "error";
 const CONFIDENCE_THRESHOLD = 0.85;
 const AUTO_SCAN_INTERVAL_MS = 3000;
 const AUTO_SCAN_BACKOFF_MS = 6000;
+const SCREEN_W = Dimensions.get("window").width;
+const SCREEN_H = Dimensions.get("window").height;
+
+// Crop a full camera photo to the region occupied by the scan frame overlay.
+// frameLayout is in screen points; photo is in pixels.
+// Returns the URI of the cropped image, or the original if crop fails.
+async function cropToFrame(
+  photoUri: string,
+  photoWidth: number,
+  photoHeight: number,
+  frame: { x: number; y: number; width: number; height: number }
+): Promise<string> {
+  try {
+    // Scale from screen points to photo pixels
+    const scaleX = photoWidth / SCREEN_W;
+    const scaleY = photoHeight / SCREEN_H;
+
+    const cropX = Math.max(0, Math.round(frame.x * scaleX));
+    const cropY = Math.max(0, Math.round(frame.y * scaleY));
+    const cropW = Math.min(Math.round(frame.width * scaleX), photoWidth - cropX);
+    const cropH = Math.min(Math.round(frame.height * scaleY), photoHeight - cropY);
+
+    console.log(
+      `[cropToFrame] photo=${photoWidth}x${photoHeight} frame=${frame.width}x${frame.height}` +
+      ` crop=(${cropX},${cropY},${cropW},${cropH})`
+    );
+
+    const result = await ImageManipulator.manipulateAsync(
+      photoUri,
+      [{ crop: { originX: cropX, originY: cropY, width: cropW, height: cropH } }],
+      { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    return result.uri;
+  } catch (err) {
+    console.warn("[cropToFrame] failed, using original:", err);
+    return photoUri;
+  }
+}
 
 // ─── List Dropdown ────────────────────────────────────────────────────────────
 function ListDropdown({ colors, onClose }: { colors: any; onClose: () => void }) {
   const { lists, activeScanListId, setActiveScanListId } = useScanContext();
-
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={ddStyles.overlay} onPress={onClose}>
@@ -165,7 +178,6 @@ function WebScannerScreen() {
           <Ionicons name="chevron-down" size={12} color={colors.mutedForeground} />
         </Pressable>
       </View>
-
       <View style={styles.scanArea}>
         <View style={[styles.cardFrame, { borderColor: colors.border, backgroundColor: colors.card }]}>
           <View style={[styles.corner, styles.cornerTL, { borderColor: colors.accent }]} />
@@ -189,13 +201,9 @@ function WebScannerScreen() {
           )}
         </View>
       </View>
-
       <View style={[styles.actions, { paddingBottom: bottomPad }]}>
         <Pressable
-          style={({ pressed }) => [
-            styles.captureBtn,
-            { backgroundColor: colors.accent, opacity: pressed || scanState === "scanning" ? 0.8 : 1 },
-          ]}
+          style={({ pressed }) => [styles.captureBtn, { backgroundColor: colors.accent, opacity: pressed || scanState === "scanning" ? 0.8 : 1 }]}
           onPress={handleTakePhoto}
           disabled={scanState === "scanning"}
         >
@@ -203,10 +211,7 @@ function WebScannerScreen() {
           <Text style={[styles.captureBtnText, { color: colors.background }]}>Take Photo</Text>
         </Pressable>
         <Pressable
-          style={({ pressed }) => [
-            styles.uploadBtn,
-            { borderColor: colors.border, backgroundColor: colors.card, opacity: pressed ? 0.7 : 1 },
-          ]}
+          style={({ pressed }) => [styles.uploadBtn, { borderColor: colors.border, backgroundColor: colors.card, opacity: pressed ? 0.7 : 1 }]}
           onPress={handleUpload}
           disabled={scanState === "scanning"}
         >
@@ -214,15 +219,8 @@ function WebScannerScreen() {
           <Text style={[styles.uploadBtnText, { color: colors.mutedForeground }]}>Upload Photo</Text>
         </Pressable>
       </View>
-
       {showListDrop && <ListDropdown colors={colors} onClose={() => setShowListDrop(false)} />}
-
-      <CardResultSheet
-        visible={showResult}
-        result={resultCard}
-        onClose={handleScanAgain}
-        onScanAgain={handleScanAgain}
-      />
+      <CardResultSheet visible={showResult} result={resultCard} onClose={handleScanAgain} onScanAgain={handleScanAgain} />
     </View>
   );
 }
@@ -248,7 +246,9 @@ function NativeScannerScreen() {
   const inflightRef = useRef(false);
   const backoffUntilRef = useRef<number>(0);
 
+  // frameLayout: absolute screen position of the scan box overlay
   const [frameLayout, setFrameLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const frameLayoutRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
   useEffect(() => { scanStateRef.current = scanState; }, [scanState]);
   useEffect(() => { showResultRef.current = showResult; }, [showResult]);
@@ -266,6 +266,25 @@ function NativeScannerScreen() {
     pulseAnim.stopAnimation();
     pulseAnim.setValue(1);
   };
+
+  const handleFrameLayout = useCallback((e: any) => {
+    // measure() gives us position relative to the window (absolute coords)
+    const node = e.target ?? e.nativeEvent?.target;
+    if (node && typeof node.measure === "function") {
+      node.measure((_fx: number, _fy: number, width: number, height: number, pageX: number, pageY: number) => {
+        const layout = { x: pageX, y: pageY, width, height };
+        setFrameLayout(layout);
+        frameLayoutRef.current = layout;
+        console.log("[frameLayout] measured:", layout);
+      });
+    } else {
+      // Fallback: use layout event coords (relative to parent, less accurate)
+      const { x, y, width, height } = e.nativeEvent.layout;
+      const layout = { x, y, width, height };
+      setFrameLayout(layout);
+      frameLayoutRef.current = layout;
+    }
+  }, []);
 
   const runIdentify = useCallback(async (uri: string, auto = false) => {
     setScanState("scanning");
@@ -299,9 +318,11 @@ function NativeScannerScreen() {
     }
   }, []);
 
-  // ─── Auto-scan loop: capture every 3 seconds ──────────────────────────────
-  // Gate 1: on-device aspect ratio check (no server call)
-  // Gate 2: OCR confidence threshold (checked after identify-card responds)
+  // ─── Auto-scan loop: every 3 seconds ────────────────────────────────────
+  // 1. Capture full photo from camera
+  // 2. Crop to the exact screen region of the corner-bracket overlay
+  // 3. Send crop to OCR — if crop is mostly blank/background the OCR
+  //    confidence will be low and runIdentify will back off automatically
   useEffect(() => {
     const interval = setInterval(async () => {
       if (showResultRef.current) return;
@@ -309,40 +330,40 @@ function NativeScannerScreen() {
       if (inflightRef.current) return;
       if (Date.now() < backoffUntilRef.current) return;
       if (!cameraRef.current) return;
+      if (!frameLayoutRef.current) {
+        console.log("[auto-scan] frame layout not measured yet, skipping");
+        return;
+      }
 
       inflightRef.current = true;
 
       try {
-        // Step 1: capture frame
-        let photo: { uri: string } | null = null;
-        try {
-          photo = await (cameraRef.current as any).takePictureAsync({
-            quality: 0.85,
-            base64: false,
-            skipProcessing: true,
-          });
-        } catch (captureErr) {
-          console.warn("[auto-scan] takePictureAsync failed:", captureErr);
+        // Step 1: capture full frame
+        const photo = await (cameraRef.current as any).takePictureAsync({
+          quality: 0.9,
+          base64: false,
+          skipProcessing: true,
+        }).catch((err: unknown) => {
+          console.warn("[auto-scan] takePictureAsync failed:", err);
+          return null;
+        });
+
+        if (!photo?.uri || !photo?.width || !photo?.height) {
+          console.warn("[auto-scan] incomplete photo data");
           inflightRef.current = false;
           return;
         }
 
-        if (!photo?.uri) {
-          console.warn("[auto-scan] no URI from takePictureAsync");
-          inflightRef.current = false;
-          return;
-        }
+        // Step 2: crop to the scan frame overlay region
+        const cropped = await cropToFrame(
+          photo.uri,
+          photo.width,
+          photo.height,
+          frameLayoutRef.current
+        );
 
-        // Step 2: on-device aspect ratio gate (replaces server detect-rectangle)
-        const hasRect = await hasCardAspectRatio(photo.uri);
-        if (!hasRect) {
-          console.log("[auto-scan] aspect ratio not card-like, discarding frame");
-          inflightRef.current = false;
-          return;
-        }
-
-        // Step 3: OCR + lookup
-        await runIdentify(photo.uri, true);
+        // Step 3: OCR the crop — low confidence = no card present = backoff
+        await runIdentify(cropped, true);
       } catch (err) {
         console.warn("[auto-scan] unexpected error:", err);
         inflightRef.current = false;
@@ -352,13 +373,18 @@ function NativeScannerScreen() {
     return () => clearInterval(interval);
   }, [runIdentify]);
 
-  // Manual capture — skips aspect ratio gate (user intent is explicit)
+  // Manual capture: crop to frame then identify
   const handleCapture = async () => {
     if (scanState === "scanning" || !cameraRef.current) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const photo = await (cameraRef.current as any).takePictureAsync({ quality: 0.85, base64: false });
-      if (photo?.uri) await runIdentify(photo.uri, false);
+      const photo = await (cameraRef.current as any).takePictureAsync({ quality: 0.9, base64: false });
+      if (!photo?.uri) return;
+      const frame = frameLayoutRef.current;
+      const uri = frame && photo.width && photo.height
+        ? await cropToFrame(photo.uri, photo.width, photo.height, frame)
+        : photo.uri;
+      await runIdentify(uri, false);
     } catch (err) {
       console.warn("[handleCapture] error:", err);
       setScanState("error");
@@ -416,6 +442,7 @@ function NativeScannerScreen() {
         flash={flash}
       />
 
+      {/* Dim regions outside scan frame */}
       {frameLayout && (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
           <View style={[styles.dimRegion, { top: 0, left: 0, right: 0, height: frameLayout.y }]} />
@@ -437,7 +464,7 @@ function NativeScannerScreen() {
       <View style={styles.frameOverlay} pointerEvents="none">
         <Animated.View
           style={[styles.scanBox, { transform: [{ scale: pulseAnim }] }]}
-          onLayout={(e) => setFrameLayout(e.nativeEvent.layout)}
+          onLayout={handleFrameLayout}
         >
           <View style={[styles.corner, styles.cornerTL, { borderColor: colors.accent }]} />
           <View style={[styles.corner, styles.cornerTR, { borderColor: colors.accent }]} />
@@ -479,13 +506,7 @@ function NativeScannerScreen() {
       </View>
 
       {showListDrop && <ListDropdown colors={colors} onClose={() => setShowListDrop(false)} />}
-
-      <CardResultSheet
-        visible={showResult}
-        result={resultCard}
-        onClose={handleScanAgain}
-        onScanAgain={handleScanAgain}
-      />
+      <CardResultSheet visible={showResult} result={resultCard} onClose={handleScanAgain} onScanAgain={handleScanAgain} />
     </View>
   );
 }
@@ -501,47 +522,38 @@ const FRAME_H = 420;
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16, paddingHorizontal: 32 },
-
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 20 },
   headerTitle: { fontSize: 26, fontFamily: "Poppins_700Bold" },
   listBadge: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5 },
   listBadgeText: { fontSize: 12, fontFamily: "Poppins_600SemiBold" },
   listDot: { width: 8, height: 8, borderRadius: 4 },
-
   scanArea: { flex: 1, alignItems: "center", justifyContent: "center" },
   cardFrame: { width: FRAME_W, height: FRAME_H, borderRadius: 16, borderWidth: 1, alignItems: "center", justifyContent: "center", gap: 14, position: "relative" },
   cameraIcon: { width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center" },
   frameHint: { fontSize: 13, fontFamily: "Poppins_400Regular", textAlign: "center", paddingHorizontal: 24 },
-
   actions: { paddingHorizontal: 24, paddingTop: 20, gap: 10 },
   captureBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 16, borderRadius: 16, gap: 10 },
   captureBtnText: { fontSize: 16, fontFamily: "Poppins_600SemiBold" },
   uploadBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 13, borderRadius: 16, gap: 8, borderWidth: 1 },
   uploadBtnText: { fontSize: 14, fontFamily: "Poppins_500Medium" },
-
   dimRegion: { position: "absolute", backgroundColor: "rgba(0,0,0,0.55)" },
-
   nativeHeader: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 12, zIndex: 10 },
   nativeHeaderTitle: { color: "#fff", fontSize: 22, fontFamily: "Poppins_700Bold" },
   listBadgeDark: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.12)" },
   listBadgeDarkText: { color: "rgba(255,255,255,0.9)", fontSize: 12, fontFamily: "Poppins_600SemiBold" },
-
   frameOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 20, pointerEvents: "none" as "none" },
   scanBox: { width: FRAME_W, height: FRAME_H, position: "relative" },
   nativeHint: { color: "rgba(255,255,255,0.85)", fontSize: 13, fontFamily: "Poppins_400Regular", textAlign: "center", paddingHorizontal: 40 },
-
   corner: { position: "absolute", width: 26, height: 26, borderWidth: 3 },
   cornerTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 6 },
   cornerTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 6 },
   cornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 6 },
   cornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 6 },
-
   nativeBottom: { position: "absolute", bottom: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingHorizontal: 40 },
   nativeUpload: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
   nativeCapture: { alignItems: "center", justifyContent: "center" },
   nativeCaptureRing: { width: 80, height: 80, borderRadius: 40, borderWidth: 3, alignItems: "center", justifyContent: "center" },
   nativeCaptureCore: { width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center" },
-
   permIcon: { width: 80, height: 80, borderRadius: 40, alignItems: "center", justifyContent: "center", marginBottom: 8 },
   permTitle: { fontSize: 20, fontFamily: "Poppins_700Bold", textAlign: "center" },
   permSub: { fontSize: 14, fontFamily: "Poppins_400Regular", textAlign: "center", lineHeight: 22 },
