@@ -18,7 +18,6 @@ import { CardScanResult, useScanContext } from "@/context/ScanContext";
 import { useColors } from "@/hooks/useColors";
 import { identifyCard } from "@/services/cardScanService";
 
-// Lazy-load expo-camera only on native to avoid web crashes
 let CameraView: React.ComponentType<{
   ref?: React.Ref<unknown>;
   style?: object;
@@ -32,7 +31,6 @@ let useCameraPermissions: (() => [
 ]) | null = null;
 
 if (Platform.OS !== "web") {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const cam = require("expo-camera");
   CameraView = cam.CameraView;
   useCameraPermissions = cam.useCameraPermissions;
@@ -41,9 +39,12 @@ if (Platform.OS !== "web") {
 type ScanState = "idle" | "scanning" | "success" | "error";
 
 const CONFIDENCE_THRESHOLD = 0.85;
-const AUTO_SCAN_INTERVAL_MS = 2000;
+// Auto-scan fires every 6s — reduces API calls ~3x vs 2s
+const AUTO_SCAN_INTERVAL_MS = 6000;
+// After a failed/low-confidence auto-scan, wait this long before retrying
+const AUTO_SCAN_BACKOFF_MS = 8000;
 
-// ─── Web version: camera capture or gallery upload ───────────────────────────
+// ─── Web version ─────────────────────────────────────────────────────────────
 function WebScannerScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -91,7 +92,6 @@ function WebScannerScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>Scanner</Text>
         <View style={[styles.listBadge, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -102,7 +102,6 @@ function WebScannerScreen() {
         </View>
       </View>
 
-      {/* Scan frame */}
       <View style={styles.scanArea}>
         <View style={[styles.cardFrame, { borderColor: colors.border, backgroundColor: colors.card }]}>
           <View style={[styles.corner, styles.cornerTL, { borderColor: colors.accent }]} />
@@ -127,7 +126,6 @@ function WebScannerScreen() {
         </View>
       </View>
 
-      {/* Actions */}
       <View style={[styles.actions, { paddingBottom: bottomPad }]}>
         <Pressable
           style={({ pressed }) => [
@@ -164,7 +162,7 @@ function WebScannerScreen() {
   );
 }
 
-// ─── Native version: live camera + auto-scan + flash toggle ──────────────────
+// ─── Native version ───────────────────────────────────────────────────────────
 function NativeScannerScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -178,17 +176,19 @@ function NativeScannerScreen() {
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const [permission, requestPermission] = useCameraPermissions!();
   const activeList = lists.find((l) => l.id === activeScanListId);
+
+  // Refs for interval closure — avoids stale state
   const scanStateRef = useRef<ScanState>("idle");
   const showResultRef = useRef(false);
+  // Inflight lock — prevents concurrent auto-scan requests
+  const inflightRef = useRef(false);
+  // Backoff timestamp — after a miss, skip ticks until this time
+  const backoffUntilRef = useRef<number>(0);
 
   const [frameLayout, setFrameLayout] = useState<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
+    x: number; y: number; width: number; height: number;
   } | null>(null);
 
-  // Keep refs in sync so the interval closure always sees latest values
   useEffect(() => { scanStateRef.current = scanState; }, [scanState]);
   useEffect(() => { showResultRef.current = showResult; }, [showResult]);
 
@@ -212,8 +212,9 @@ function NativeScannerScreen() {
     startPulse();
     try {
       const card = await identifyCard(uri);
-      // For auto-scan, apply confidence gate — retry silently if too low
       if (auto && typeof (card as any).confidence === "number" && (card as any).confidence < CONFIDENCE_THRESHOLD) {
+        // Low confidence — apply backoff before next auto attempt
+        backoffUntilRef.current = Date.now() + AUTO_SCAN_BACKOFF_MS;
         setScanState("idle");
         return;
       }
@@ -223,7 +224,8 @@ function NativeScannerScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err: unknown) {
       if (auto) {
-        // Silent retry on auto-scan errors
+        // Error on auto-scan — apply backoff
+        backoffUntilRef.current = Date.now() + AUTO_SCAN_BACKOFF_MS;
         setScanState("idle");
       } else {
         setErrorMsg(err instanceof Error ? err.message : "Failed to identify card");
@@ -232,23 +234,30 @@ function NativeScannerScreen() {
       }
     } finally {
       stopPulse();
+      inflightRef.current = false;
     }
   }, []);
 
-  // ── Auto-scan interval ────────────────────────────────────────────────────
+  // ── Auto-scan interval (6s, with inflight lock + backoff) ─────────────────
   useEffect(() => {
     const interval = setInterval(async () => {
-      if (scanStateRef.current !== "idle" || showResultRef.current) return;
+      // Skip if: result showing, already scanning, request in flight, or in backoff window
+      if (showResultRef.current) return;
+      if (scanStateRef.current !== "idle") return;
+      if (inflightRef.current) return;
+      if (Date.now() < backoffUntilRef.current) return;
       if (!cameraRef.current) return;
+
+      inflightRef.current = true;
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const photo = await (cameraRef.current as any).takePictureAsync({
-          quality: 0.82,
+          quality: 0.7,   // Lower quality = smaller payload = cheaper + faster
           base64: false,
         });
         if (photo?.uri) await runIdentify(photo.uri, true);
+        else inflightRef.current = false;
       } catch {
-        // Camera not ready yet — skip this tick
+        inflightRef.current = false;
       }
     }, AUTO_SCAN_INTERVAL_MS);
     return () => clearInterval(interval);
@@ -258,7 +267,6 @@ function NativeScannerScreen() {
     if (scanState === "scanning" || !cameraRef.current) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const photo = await (cameraRef.current as any).takePictureAsync({
         quality: 0.85,
         base64: false,
@@ -280,6 +288,7 @@ function NativeScannerScreen() {
     setResultCard(null);
     setScanState("idle");
     setErrorMsg("");
+    backoffUntilRef.current = 0;
   };
 
   if (!permission) {
@@ -319,7 +328,6 @@ function NativeScannerScreen() {
         flash={flash}
       />
 
-      {/* ── Dim overlay ── */}
       {frameLayout && (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
           <View style={[styles.dimRegion, { top: 0, left: 0, right: 0, height: frameLayout.y }]} />
@@ -329,7 +337,6 @@ function NativeScannerScreen() {
         </View>
       )}
 
-      {/* Header */}
       <View style={[styles.nativeHeader, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.nativeHeaderTitle}>Scan Card</Text>
         <View style={styles.listBadgeDark}>
@@ -338,7 +345,6 @@ function NativeScannerScreen() {
         </View>
       </View>
 
-      {/* Frame corners */}
       <View style={styles.frameOverlay} pointerEvents="none">
         <Animated.View
           style={[styles.scanBox, { transform: [{ scale: pulseAnim }] }]}
@@ -356,10 +362,8 @@ function NativeScannerScreen() {
         </Text>
       </View>
 
-      {/* Bottom controls */}
       <View style={[styles.nativeBottom, { paddingBottom: insets.bottom + 90 }]}>
-        <Pressable style={styles.nativeUpload} onPress={handleUpload} disabled={scanState === "scanning"}
-        >
+        <Pressable style={styles.nativeUpload} onPress={handleUpload} disabled={scanState === "scanning"}>
           <Ionicons name="image-outline" size={22} color="rgba(255,255,255,0.7)" />
         </Pressable>
 
@@ -402,7 +406,7 @@ function NativeScannerScreen() {
 
 export default function ScannerScreen() {
   if (Platform.OS === "web") return <WebScannerScreen />;
-  return <NativeScannerScreen />
+  return <NativeScannerScreen />;
 }
 
 const FRAME_W = 300;
@@ -412,7 +416,6 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16, paddingHorizontal: 32 },
 
-  // Web
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 20 },
   headerTitle: { fontSize: 26, fontFamily: "Poppins_700Bold" },
   listBadge: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1 },
@@ -430,15 +433,9 @@ const styles = StyleSheet.create({
   frameHint: { fontSize: 13, fontFamily: "Poppins_400Regular", textAlign: "center", paddingHorizontal: 24 },
 
   actions: { paddingHorizontal: 24, paddingTop: 20, gap: 10 },
-  captureBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    paddingVertical: 16, borderRadius: 16, gap: 10,
-  },
+  captureBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 16, borderRadius: 16, gap: 10 },
   captureBtnText: { fontSize: 16, fontFamily: "Poppins_600SemiBold" },
-  uploadBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    paddingVertical: 13, borderRadius: 16, gap: 8, borderWidth: 1,
-  },
+  uploadBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 13, borderRadius: 16, gap: 8, borderWidth: 1 },
   uploadBtnText: { fontSize: 14, fontFamily: "Poppins_500Medium" },
 
   dimRegion: { position: "absolute", backgroundColor: "rgba(0,0,0,0.55)" },
@@ -473,11 +470,7 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", justifyContent: "space-around",
     paddingHorizontal: 40,
   },
-  nativeUpload: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    alignItems: "center", justifyContent: "center",
-  },
+  nativeUpload: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
   nativeCapture: { alignItems: "center", justifyContent: "center" },
   nativeCaptureRing: { width: 80, height: 80, borderRadius: 40, borderWidth: 3, alignItems: "center", justifyContent: "center" },
   nativeCaptureCore: { width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center" },
