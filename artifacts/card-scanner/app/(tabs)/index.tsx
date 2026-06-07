@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { CardResultSheet } from "@/components/CardResultSheet";
+import { VariantPickerModal } from "@/components/VariantPickerModal";
 import { CardScanResult, useScanContext } from "@/context/ScanContext";
 import { useColors } from "@/hooks/useColors";
 import { identifyCard } from "@/services/cardScanService";
@@ -47,9 +48,6 @@ const AUTO_SCAN_BACKOFF_MS = 6000;
 const SCREEN_W = Dimensions.get("window").width;
 const SCREEN_H = Dimensions.get("window").height;
 
-// Crop a full camera photo to the region occupied by the scan frame overlay.
-// frameLayout is in screen points; photo is in pixels.
-// Returns the URI of the cropped image, or the original if crop fails.
 async function cropToFrame(
   photoUri: string,
   photoWidth: number,
@@ -57,7 +55,6 @@ async function cropToFrame(
   frame: { x: number; y: number; width: number; height: number }
 ): Promise<string> {
   try {
-    // Scale from screen points to photo pixels
     const scaleX = photoWidth / SCREEN_W;
     const scaleY = photoHeight / SCREEN_H;
 
@@ -125,6 +122,8 @@ function WebScannerScreen() {
   const [resultCard, setResultCard] = useState<CardScanResult | null>(null);
   const [showResult, setShowResult] = useState(false);
   const [showListDrop, setShowListDrop] = useState(false);
+  const [variantCards, setVariantCards] = useState<CardScanResult[]>([]);
+  const [showVariantPicker, setShowVariantPicker] = useState(false);
   const { lists, activeScanListId } = useScanContext();
   const activeList = lists.find((l) => l.id === activeScanListId);
   const topPad = 67;
@@ -134,14 +133,36 @@ function WebScannerScreen() {
     setScanState("scanning");
     setErrorMsg("");
     try {
-      const card = await identifyCard(uri);
-      setResultCard(card);
+      const result = await identifyCard(uri);
+
+      if (result.type === "variants") {
+        setVariantCards(result.cards);
+        setShowVariantPicker(true);
+        setScanState("idle");
+        return;
+      }
+
+      setResultCard(result.card);
       setShowResult(true);
       setScanState("success");
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to identify card");
       setScanState("error");
     }
+  };
+
+  const handleVariantSelect = (card: CardScanResult) => {
+    setShowVariantPicker(false);
+    setVariantCards([]);
+    setResultCard(card);
+    setShowResult(true);
+    setScanState("success");
+  };
+
+  const handleVariantCancel = () => {
+    setShowVariantPicker(false);
+    setVariantCards([]);
+    setScanState("idle");
   };
 
   const handleTakePhoto = async () => {
@@ -220,6 +241,12 @@ function WebScannerScreen() {
         </Pressable>
       </View>
       {showListDrop && <ListDropdown colors={colors} onClose={() => setShowListDrop(false)} />}
+      <VariantPickerModal
+        visible={showVariantPicker}
+        variants={variantCards}
+        onSelect={handleVariantSelect}
+        onCancel={handleVariantCancel}
+      />
       <CardResultSheet visible={showResult} result={resultCard} onClose={handleScanAgain} onScanAgain={handleScanAgain} />
     </View>
   );
@@ -236,6 +263,8 @@ function NativeScannerScreen() {
   const [showResult, setShowResult] = useState(false);
   const [flash, setFlash] = useState<"on" | "off">("off");
   const [showListDrop, setShowListDrop] = useState(false);
+  const [variantCards, setVariantCards] = useState<CardScanResult[]>([]);
+  const [showVariantPicker, setShowVariantPicker] = useState(false);
   const { lists, activeScanListId } = useScanContext();
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const [permission, requestPermission] = useCameraPermissions!();
@@ -243,15 +272,16 @@ function NativeScannerScreen() {
 
   const scanStateRef = useRef<ScanState>("idle");
   const showResultRef = useRef(false);
+  const showVariantPickerRef = useRef(false);
   const inflightRef = useRef(false);
   const backoffUntilRef = useRef<number>(0);
 
-  // frameLayout: absolute screen position of the scan box overlay
   const [frameLayout, setFrameLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const frameLayoutRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
   useEffect(() => { scanStateRef.current = scanState; }, [scanState]);
   useEffect(() => { showResultRef.current = showResult; }, [showResult]);
+  useEffect(() => { showVariantPickerRef.current = showVariantPicker; }, [showVariantPicker]);
 
   const startPulse = () => {
     Animated.loop(
@@ -268,7 +298,6 @@ function NativeScannerScreen() {
   };
 
   const handleFrameLayout = useCallback((e: any) => {
-    // measure() gives us position relative to the window (absolute coords)
     const node = e.target ?? e.nativeEvent?.target;
     if (node && typeof node.measure === "function") {
       node.measure((_fx: number, _fy: number, width: number, height: number, pageX: number, pageY: number) => {
@@ -278,7 +307,6 @@ function NativeScannerScreen() {
         console.log("[frameLayout] measured:", layout);
       });
     } else {
-      // Fallback: use layout event coords (relative to parent, less accurate)
       const { x, y, width, height } = e.nativeEvent.layout;
       const layout = { x, y, width, height };
       setFrameLayout(layout);
@@ -291,8 +319,20 @@ function NativeScannerScreen() {
     setErrorMsg("");
     startPulse();
     try {
-      const card = await identifyCard(uri);
-      if (auto && typeof (card as any).confidence === "number" && (card as any).confidence < CONFIDENCE_THRESHOLD) {
+      const result = await identifyCard(uri);
+
+      if (result.type === "variants") {
+        // Multiple variants — pause auto-scan and show picker
+        setVariantCards(result.cards);
+        setShowVariantPicker(true);
+        setScanState("idle");
+        stopPulse();
+        inflightRef.current = false;
+        return;
+      }
+
+      const card = result.card;
+      if (auto && typeof card.confidence === "number" && card.confidence < CONFIDENCE_THRESHOLD) {
         console.log("[runIdentify] auto-scan below confidence threshold, backing off");
         backoffUntilRef.current = Date.now() + AUTO_SCAN_BACKOFF_MS;
         setScanState("idle");
@@ -318,14 +358,27 @@ function NativeScannerScreen() {
     }
   }, []);
 
-  // ─── Auto-scan loop: every 3 seconds ────────────────────────────────────
-  // 1. Capture full photo from camera
-  // 2. Crop to the exact screen region of the corner-bracket overlay
-  // 3. Send crop to OCR — if crop is mostly blank/background the OCR
-  //    confidence will be low and runIdentify will back off automatically
+  const handleVariantSelect = (card: CardScanResult) => {
+    setShowVariantPicker(false);
+    setVariantCards([]);
+    setResultCard(card);
+    setShowResult(true);
+    setScanState("success");
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const handleVariantCancel = () => {
+    setShowVariantPicker(false);
+    setVariantCards([]);
+    setScanState("idle");
+    backoffUntilRef.current = 0;
+  };
+
+  // Auto-scan loop: skips when variant picker is open
   useEffect(() => {
     const interval = setInterval(async () => {
       if (showResultRef.current) return;
+      if (showVariantPickerRef.current) return;
       if (scanStateRef.current !== "idle") return;
       if (inflightRef.current) return;
       if (Date.now() < backoffUntilRef.current) return;
@@ -338,7 +391,6 @@ function NativeScannerScreen() {
       inflightRef.current = true;
 
       try {
-        // Step 1: capture full frame
         const photo = await (cameraRef.current as any).takePictureAsync({
           quality: 0.9,
           base64: false,
@@ -354,7 +406,6 @@ function NativeScannerScreen() {
           return;
         }
 
-        // Step 2: crop to the scan frame overlay region
         const cropped = await cropToFrame(
           photo.uri,
           photo.width,
@@ -362,7 +413,6 @@ function NativeScannerScreen() {
           frameLayoutRef.current
         );
 
-        // Step 3: OCR the crop — low confidence = no card present = backoff
         await runIdentify(cropped, true);
       } catch (err) {
         console.warn("[auto-scan] unexpected error:", err);
@@ -373,7 +423,6 @@ function NativeScannerScreen() {
     return () => clearInterval(interval);
   }, [runIdentify]);
 
-  // Manual capture: crop to frame then identify
   const handleCapture = async () => {
     if (scanState === "scanning" || !cameraRef.current) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -442,7 +491,6 @@ function NativeScannerScreen() {
         flash={flash}
       />
 
-      {/* Dim regions outside scan frame */}
       {frameLayout && (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
           <View style={[styles.dimRegion, { top: 0, left: 0, right: 0, height: frameLayout.y }]} />
@@ -506,6 +554,12 @@ function NativeScannerScreen() {
       </View>
 
       {showListDrop && <ListDropdown colors={colors} onClose={() => setShowListDrop(false)} />}
+      <VariantPickerModal
+        visible={showVariantPicker}
+        variants={variantCards}
+        onSelect={handleVariantSelect}
+        onCancel={handleVariantCancel}
+      />
       <CardResultSheet visible={showResult} result={resultCard} onClose={handleScanAgain} onScanAgain={handleScanAgain} />
     </View>
   );
