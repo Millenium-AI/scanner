@@ -32,7 +32,12 @@ async function ocrCard(imageBase64: string, mimeType: string): Promise<{ name: s
   });
 
   const data = await response.json() as any;
-  if (!data.choices?.[0]) throw new Error("Vision API returned no choices");
+  console.log("OpenRouter HTTP status:", response.status);
+  console.log("OpenRouter response:", JSON.stringify(data, null, 2));
+
+  if (!data.choices?.[0]) {
+    throw new Error(`Vision API returned no choices. Status: ${response.status}. Body: ${JSON.stringify(data)}`);
+  }
 
   const raw = data.choices[0].message.content.trim();
   // Strip markdown code fences if model wraps in ```json
