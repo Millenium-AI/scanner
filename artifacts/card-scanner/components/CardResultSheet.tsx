@@ -170,11 +170,20 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
             { transform: [{ translateY }] },
           ]}
         >
-          {/* Drag handle (gesture attached here so it never conflicts with ScrollView) */}
-          <View {...panResponder.panHandlers} style={styles.dragHandleTouch}>
-            <View style={styles.dragHandle}>
-              <View style={[styles.handle, { backgroundColor: colors.border }]} />
+          {/* Header row: drag handle + close button */}
+          <View style={styles.headerRow}>
+            <View {...panResponder.panHandlers} style={styles.dragHandleTouch}>
+              <View style={styles.dragHandle}>
+                <View style={[styles.handle, { backgroundColor: colors.border }]} />
+              </View>
             </View>
+            <Pressable
+              onPress={onClose}
+              style={styles.closeButton}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="close" size={20} color={colors.mutedForeground} />
+            </Pressable>
           </View>
 
           {showCreateList ? (
@@ -515,11 +524,21 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   dismissArea: { flex: 1 },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   dragHandleTouch: {
+    flex: 1,
     paddingTop: 8,
     paddingBottom: 4,
   },
   dragHandle: { alignItems: "center", paddingBottom: 8 },
+  closeButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+  },
   sheet: {
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
