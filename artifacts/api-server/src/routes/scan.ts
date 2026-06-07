@@ -36,9 +36,8 @@ function buildMarketplaceUrls(
 
 // --- In-memory caches ---
 
-const CACHE_TTL = 1000 * 60 * 60; // 1 hour
+const CACHE_TTL = 1000 * 60 * 60;
 
-// Search result cache (query-level, 500 entries)
 const searchCache = new Map<string, { data: any[]; ts: number }>();
 
 function getCached(key: string): any[] | null {
@@ -55,8 +54,6 @@ function setCache(key: string, data: any[]) {
   }
 }
 
-// One Piece set-level cache — keyed by set code e.g. "OP06"
-// One fetch covers ALL cards in the set; subsequent scans of any card in that set cost 0 API calls
 const opSetCache = new Map<string, { cards: any[]; ts: number }>();
 
 async function getOpSetCards(setCode: string, apiKey: string): Promise<any[]> {
@@ -85,7 +82,6 @@ async function getOpSetCards(setCode: string, apiKey: string): Promise<any[]> {
   return cards;
 }
 
-// Card-level cache for TCGdex individual fetches
 const cardCache = new Map<string, { data: any; ts: number }>();
 
 async function fetchTCGdexCard(id: string): Promise<any | null> {
@@ -112,21 +108,15 @@ function mapPokemonResultFromPokeWallet(card: any): any {
   const info = card.card_info;
   const tcg = card.tcgplayer;
   const cardId: string = card.id;
-
   const pick = (prices: any[], field: string) =>
     prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil")?.[field] ??
     prices?.[0]?.[field] ?? undefined;
-
   const name: string = info.name;
   const setName: string = info.set_name ?? "";
   const number: string | null = info.card_number ?? null;
   const { tcg_url, ebay_url } = buildMarketplaceUrls(name, setName, number);
-
   return {
-    cardId,
-    name,
-    set: setName,
-    number,
+    cardId, name, set: setName, number,
     rarity: info.rarity ?? null,
     game: "Pokemon",
     imageUrl: buildProxyImageUrl(cardId),
@@ -145,12 +135,8 @@ function mapOnePieceResult(card: any): any {
   const setName: string = card.card_number?.split("-")[0] ?? "";
   const number: string | null = card.card_number ?? null;
   const { ebay_url } = buildMarketplaceUrls(name, setName, number);
-
   return {
-    cardId,
-    name,
-    set: setName,
-    number,
+    cardId, name, set: setName, number,
     rarity: card.rarity ?? null,
     subType: card.sub_type_name ?? null,
     game: "One Piece",
@@ -168,34 +154,21 @@ function mapPokemonResultFromTCGdex(card: any, ocrSetName: string | null): any {
   const pricing = card.pricing ?? {};
   const tcg = pricing.tcgplayer ?? {};
   const cm = pricing.cardmarket ?? {};
-
   const tcgVariant = tcg.normal ?? tcg.holofoil ?? tcg["reverse-holofoil"] ?? {};
   const marketValue: number | undefined =
-    typeof tcgVariant.marketPrice === "number"
-      ? tcgVariant.marketPrice
-      : typeof cm.avg === "number"
-        ? cm.avg
-        : undefined;
-
+    typeof tcgVariant.marketPrice === "number" ? tcgVariant.marketPrice :
+    typeof cm.avg === "number" ? cm.avg : undefined;
   const imageBare: string | undefined = card.image;
   const imageUrl = imageBare ? `${imageBare}/high.webp` : undefined;
-
   const name: string = card.name;
   const setName: string = card.set?.name ?? ocrSetName ?? "";
   const number: string | null = card.localId ? String(card.localId) : null;
   const { tcg_url, ebay_url } = buildMarketplaceUrls(name, setName, number);
-
   return {
-    cardId,
-    name,
-    set: setName,
-    number,
+    cardId, name, set: setName, number,
     rarity: card.rarity ?? null,
     game: "Pokemon",
-    imageUrl,
-    tcg_url,
-    ebay_url,
-    marketValue,
+    imageUrl, tcg_url, ebay_url, marketValue,
     cardmarket_trend: typeof cm.trend === "number" ? cm.trend : undefined,
     cardmarket_avg7: typeof cm.avg7 === "number" ? cm.avg7 : undefined,
     confidence: 1.0,
@@ -210,7 +183,9 @@ interface OcrResult {
   setName: string | null;
   game: string;
   language: "Japanese" | "English";
-  finish: "Foil" | "Normal";
+  // Finish from OCR is always Foil or Normal (camera can't see Reverse Foil reliably).
+  // The client filter may supply "Reverse Foil" as an override.
+  finish: "Foil" | "Normal" | "Reverse Foil";
   confidence: number;
 }
 
@@ -306,16 +281,31 @@ function normalizeStr(raw: string | null | undefined): string {
 
 // --- Pokemon lookup via TCGdex ---
 
+// setFilter is a TCGdex set code e.g. "sv3" — when provided we constrain candidates to that set.
 async function lookupPokemonVariantsViaTCGdex(
   name: string,
   number: string | null,
-  setName: string | null
+  setName: string | null,
+  setFilter: string | null = null
 ): Promise<any[]> {
   const { local } = parsePokemonCollectorNumber(number);
 
   let candidates: any[] = [];
 
-  if (local) {
+  // If the user pinned a set code, query that set directly first
+  if (setFilter) {
+    const url = local
+      ? `${TCGDEX_BASE}/cards?name=eq:${encodeURIComponent(name)}&localId=${local}&set.id=eq:${setFilter}`
+      : `${TCGDEX_BASE}/cards?name=eq:${encodeURIComponent(name)}&set.id=eq:${setFilter}`;
+    console.log("[tcgdex] set-filtered search:", url);
+    const res = await fetch(url);
+    if (res.ok) {
+      candidates = await res.json();
+      console.log(`[tcgdex] set-filtered results: ${candidates.length}`);
+    }
+  }
+
+  if (candidates.length === 0 && local) {
     const url = `${TCGDEX_BASE}/cards?name=eq:${encodeURIComponent(name)}&localId=${local}`;
     console.log("[tcgdex] search:", url);
     const res = await fetch(url);
@@ -351,7 +341,14 @@ async function lookupPokemonVariantsViaTCGdex(
   }
 
   let pool = candidates;
-  if (setName && candidates.length > 1) {
+
+  // If set filter is active, hard-restrict to that set code
+  if (setFilter) {
+    const byCode = candidates.filter((c: any) => c.set?.id === setFilter);
+    if (byCode.length > 0) {
+      pool = byCode;
+    }
+  } else if (setName && candidates.length > 1) {
     const target = normalizeStr(setName);
     const bySet = candidates.filter((c: any) => {
       const norm = normalizeStr(c.set?.name);
@@ -382,18 +379,28 @@ async function lookupOnePieceVariants(
   number: string | null,
   apiKey: string,
   language: "Japanese" | "English",
-  finish: "Foil" | "Normal"
+  finish: "Foil" | "Normal" | "Reverse Foil",
+  // setFilter is an OP set code e.g. "OP06"
+  setFilter: string | null = null
 ): Promise<any[]> {
-  const setCode = number?.match(/^([A-Z]{2}\d{2})-/)?.[1] ?? null;
+  // Prefer the pinned set code; fall back to parsing the collector number
+  const setCode = setFilter ?? number?.match(/^([A-Z]{2}\d{2})-/)?.[1] ?? null;
 
   let rawCards: any[] = [];
 
   if (setCode) {
     const allSetCards = await getOpSetCards(setCode, apiKey);
-    rawCards = allSetCards.filter((c: any) =>
-      c.card_number?.toUpperCase() === number?.toUpperCase()
-    );
-    console.log(`[op] ${number} in set ${setCode}: ${rawCards.length} variants before filtering`);
+    rawCards = number
+      ? allSetCards.filter((c: any) => c.card_number?.toUpperCase() === number?.toUpperCase())
+      : allSetCards;  // no number + set filter → keep whole set for name search below
+    console.log(`[op] ${number ?? "(no number)"} in set ${setCode}: ${rawCards.length} before filtering`);
+  }
+
+  // If no number was given and we have a set cache, do a name filter
+  if (!number && rawCards.length > 0) {
+    const normName = normalizeStr(name);
+    rawCards = rawCards.filter((c: any) => normalizeStr(c.name).includes(normName));
+    console.log(`[op] name filter "${name}" → ${rawCards.length}`);
   }
 
   if (rawCards.length === 0) {
@@ -405,12 +412,14 @@ async function lookupOnePieceVariants(
     if (res.ok) {
       const data = (await res.json()) as any;
       rawCards = (data.data ?? []).filter((c: any) =>
-        c.id &&
-        c.name &&
-        c.card_number &&
+        c.id && c.name && c.card_number &&
         /^[A-Z]{2}\d{2}-\d{3}/.test(c.card_number) &&
         (c.tcgplayer?.prices || c.cardmarket?.prices)
       );
+      // If set filter active, narrow further
+      if (setFilter) {
+        rawCards = rawCards.filter((c: any) => c.card_number?.startsWith(setFilter));
+      }
     }
   }
 
@@ -423,7 +432,7 @@ async function lookupOnePieceVariants(
 
   let filtered = rawCards;
   const jpCards = filtered.filter(isJapanese);
-  const enCards = filtered.filter(c => !isJapanese(c));
+  const enCards = filtered.filter((c: any) => !isJapanese(c));
 
   if (language === "Japanese" && jpCards.length > 0) {
     filtered = jpCards;
@@ -433,24 +442,26 @@ async function lookupOnePieceVariants(
     console.log(`[op] language=English → ${filtered.length} variants`);
   }
 
-  const foilCards = filtered.filter(c => c.sub_type_name === "Foil");
-  const normalCards = filtered.filter(c => c.sub_type_name === "Normal");
+  // Reverse Foil doesn't exist in OP — treat it as Foil if somehow sent
+  const resolvedFinish = finish === "Reverse Foil" ? "Foil" : finish;
+  const foilCards = filtered.filter((c: any) => c.sub_type_name === "Foil");
+  const normalCards = filtered.filter((c: any) => c.sub_type_name === "Normal");
 
-  if (finish === "Foil" && foilCards.length > 0) {
+  if (resolvedFinish === "Foil" && foilCards.length > 0) {
     filtered = foilCards;
     console.log(`[op] finish=Foil → ${filtered.length} variants`);
-  } else if (finish === "Normal" && normalCards.length > 0) {
+  } else if (resolvedFinish === "Normal" && normalCards.length > 0) {
     filtered = normalCards;
     console.log(`[op] finish=Normal → ${filtered.length} variants`);
   }
 
-  filtered.sort((a, b) => {
+  filtered.sort((a: any, b: any) => {
     const aVal = a.tcgplayer?.prices?.market_price ?? a.cardmarket?.prices?.avg ?? 0;
     const bVal = b.tcgplayer?.prices?.market_price ?? b.cardmarket?.prices?.avg ?? 0;
     return bVal - aVal;
   });
 
-  console.log(`[op] final variant count for ${number}: ${filtered.length}`);
+  console.log(`[op] final variant count for ${number ?? name}: ${filtered.length}`);
   return filtered.map(mapOnePieceResult);
 }
 
@@ -462,14 +473,15 @@ async function lookupCardVariants(
   game: string,
   setName: string | null,
   language: "Japanese" | "English",
-  finish: "Foil" | "Normal"
+  finish: "Foil" | "Normal" | "Reverse Foil",
+  setFilter: string | null = null
 ): Promise<any[]> {
   const apiKey = process.env.POKEWALLET_API_KEY;
   if (game.toLowerCase() === "one piece") {
     if (!apiKey) throw new Error("POKEWALLET_API_KEY not set for One Piece");
-    return lookupOnePieceVariants(name, number, apiKey, language, finish);
+    return lookupOnePieceVariants(name, number, apiKey, language, finish, setFilter);
   }
-  return lookupPokemonVariantsViaTCGdex(name, number, setName);
+  return lookupPokemonVariantsViaTCGdex(name, number, setName, setFilter);
 }
 
 // --- Price refresh ---
@@ -501,9 +513,10 @@ async function lookupPriceById(cardId: string): Promise<{ cardId: string; market
       prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil")?.[field] ??
       prices?.[0]?.[field] ?? undefined;
     return {
-      cardId, marketValue: isOP
+      cardId,
+      marketValue: isOP
         ? (data.tcgplayer?.prices?.market_price ?? data.cardmarket?.prices?.avg)
-        : pick(data.tcgplayer?.prices, "market_price")
+        : pick(data.tcgplayer?.prices, "market_price"),
     };
   } catch { return null; }
 }
@@ -566,24 +579,54 @@ router.post("/identify-card", upload.single("image"), async (req, res) => {
   if (!req.file) { res.status(400).json({ error: "No image provided" }); return; }
   try {
     const ocr = await ocrCard(req.file.buffer.toString("base64"), req.file.mimetype);
-    console.log("[identify-card] OCR:", ocr);
+    console.log("[identify-card] OCR raw:", ocr);
+
+    // --- Apply client filter overrides ---
+    // Any field sent by the client takes precedence over OCR.
+    // Only unset fields fall back to what OCR detected.
+    const fGame     = (req.body.game     as string | undefined)?.trim() || null;
+    const fSet      = (req.body.set      as string | undefined)?.trim() || null;
+    const fLanguage = (req.body.language as string | undefined)?.trim() || null;
+    const fFinish   = (req.body.finish   as string | undefined)?.trim() || null;
+
+    const game: string =
+      fGame ?? ocr.game;
+
+    const language: "Japanese" | "English" =
+      fLanguage === "Japanese" ? "Japanese" :
+      fLanguage === "English"  ? "English"  :
+      ocr.language;
+
+    const finish: "Foil" | "Normal" | "Reverse Foil" =
+      fFinish === "Foil"         ? "Foil" :
+      fFinish === "Reverse Foil" ? "Reverse Foil" :
+      fFinish === "Normal"       ? "Normal" :
+      ocr.finish;
+
+    // setFilter is the raw code (e.g. "sv3" or "OP06") from the client;
+    // setName from OCR is the human-readable name used as a fallback hint.
+    const setFilter: string | null = fSet;
+    const setName: string | null   = fSet ? null : ocr.setName;
+
+    console.log("[identify-card] resolved:", { game, language, finish, setFilter, setName });
+
     if (!ocr.name) { res.status(422).json({ error: "Could not read card name", confidence: ocr.confidence }); return; }
     if (ocr.confidence < 0.75) { res.status(422).json({ error: "Could not read card clearly", confidence: ocr.confidence }); return; }
     if (ocr.name.trim().length < 2) { res.status(422).json({ error: "Card name too short", confidence: ocr.confidence }); return; }
 
     const variants = await lookupCardVariants(
-      ocr.name, ocr.number, ocr.game, ocr.setName, ocr.language, ocr.finish
+      ocr.name, ocr.number, game, setName, language, finish, setFilter
     );
 
     if (variants.length === 0) {
-      const { tcg_url, ebay_url } = buildMarketplaceUrls(ocr.name, ocr.setName, ocr.number);
+      const { tcg_url, ebay_url } = buildMarketplaceUrls(ocr.name, setName, ocr.number);
       res.json({
         variants: [{
           cardId: `ocr-${Date.now()}`,
           name: ocr.name,
           number: ocr.number,
-          set: ocr.setName ?? "",
-          game: ocr.game,
+          set: setName ?? "",
+          game,
           tcg_url,
           ebay_url,
           confidence: ocr.confidence * 0.7,
