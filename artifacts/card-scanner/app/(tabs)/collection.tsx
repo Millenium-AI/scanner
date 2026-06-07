@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -10,7 +10,6 @@ import {
   Text,
   TextInput,
   View,
-  Modal,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -26,120 +25,6 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "name", label: "A–Z" },
   { key: "game", label: "Game" },
 ];
-
-const PRESETS = [70, 80, 85];
-
-function TradeCalculator({ totalValue, colors }: { totalValue: number; colors: any }) {
-  const [activePreset, setActivePreset] = useState<number | null>(null);
-  const [customModalVisible, setCustomModalVisible] = useState(false);
-  const [customInput, setCustomInput] = useState("");
-  const [customPct, setCustomPct] = useState<number | null>(null);
-
-  const activePct = customPct !== null && activePreset === -1 ? customPct : activePreset;
-  const tradeValue = activePct !== null ? (totalValue * activePct) / 100 : null;
-
-  const handlePreset = (pct: number) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setActivePreset(pct);
-    setCustomPct(null);
-  };
-
-  const handleCustomConfirm = () => {
-    const parsed = parseFloat(customInput);
-    if (!isNaN(parsed) && parsed > 0 && parsed <= 200) {
-      setCustomPct(parsed);
-      setActivePreset(-1);
-    }
-    setCustomModalVisible(false);
-    setCustomInput("");
-  };
-
-  return (
-    <>
-      <View style={[calcStyles.bar, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        {/* Total value */}
-        <View style={calcStyles.totalBlock}>
-          <Text style={[calcStyles.totalLabel, { color: colors.mutedForeground }]}>TOTAL VALUE</Text>
-          <Text style={[calcStyles.totalAmt, { color: colors.accent }]}>${totalValue.toFixed(2)}</Text>
-        </View>
-
-        {/* Divider */}
-        <View style={[calcStyles.divider, { backgroundColor: colors.border }]} />
-
-        {/* Preset buttons */}
-        <View style={calcStyles.btnGroup}>
-          {PRESETS.map((pct) => (
-            <Pressable
-              key={pct}
-              style={[calcStyles.pctBtn,
-                activePreset === pct
-                  ? { backgroundColor: colors.accent }
-                  : { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }
-              ]}
-              onPress={() => handlePreset(pct)}
-            >
-              <Text style={[calcStyles.pctBtnText, { color: activePreset === pct ? colors.background : colors.mutedForeground }]}>
-                {pct}%
-              </Text>
-            </Pressable>
-          ))}
-          <Pressable
-            style={[calcStyles.pctBtn,
-              activePreset === -1
-                ? { backgroundColor: colors.accent }
-                : { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }
-            ]}
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setCustomModalVisible(true); }}
-          >
-            <Text style={[calcStyles.pctBtnText, { color: activePreset === -1 ? colors.background : colors.mutedForeground }]}>
-              {activePreset === -1 && customPct !== null ? `${customPct}%` : "···"}
-            </Text>
-          </Pressable>
-        </View>
-      </View>
-
-      {/* Trade result */}
-      {tradeValue !== null && (
-        <View style={[calcStyles.result, { backgroundColor: colors.success + "15", borderColor: colors.success + "40", borderWidth: 1 }]}>
-          <Text style={[calcStyles.resultLabel, { color: colors.mutedForeground }]}>
-            At {activePct}% trade value
-          </Text>
-          <Text style={[calcStyles.resultAmt, { color: colors.success }]}>
-            ${tradeValue.toFixed(2)}
-          </Text>
-        </View>
-      )}
-
-      {/* Custom % modal */}
-      <Modal visible={customModalVisible} transparent animationType="fade" onRequestClose={() => setCustomModalVisible(false)}>
-        <Pressable style={calcStyles.modalOverlay} onPress={() => setCustomModalVisible(false)}>
-          <Pressable style={[calcStyles.modalBox, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1 }]}>
-            <Text style={[calcStyles.modalTitle, { color: colors.foreground }]}>Custom Percentage</Text>
-            <TextInput
-              style={[calcStyles.modalInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.surface }]}
-              keyboardType="decimal-pad"
-              placeholder="e.g. 75"
-              placeholderTextColor={colors.mutedForeground}
-              value={customInput}
-              onChangeText={setCustomInput}
-              autoFocus
-              returnKeyType="done"
-              onSubmitEditing={handleCustomConfirm}
-            />
-            <View style={calcStyles.modalActions}>
-              <Pressable style={[calcStyles.modalBtn, { borderColor: colors.border, borderWidth: 1 }]} onPress={() => setCustomModalVisible(false)}>
-                <Text style={[calcStyles.modalBtnText, { color: colors.mutedForeground }]}>Cancel</Text>
-              </Pressable>
-              <Pressable style={[calcStyles.modalBtn, { backgroundColor: colors.accent }]} onPress={handleCustomConfirm}>
-                <Text style={[calcStyles.modalBtnText, { color: colors.background }]}>Apply</Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
-    </>
-  );
-}
 
 export default function CollectionScreen() {
   const colors = useColors();
@@ -193,11 +78,9 @@ export default function CollectionScreen() {
       {/* Header */}
       <View style={styles.headerRow}>
         <Text style={[styles.title, { color: colors.foreground }]}>Collection</Text>
-      </View>
-
-      {/* Trade Calculator + Total Value bar */}
-      <View style={styles.calcWrapper}>
-        <TradeCalculator totalValue={totalCollectionValue} colors={colors} />
+        <View style={[styles.valuePill, { backgroundColor: colors.accent + "20", borderColor: colors.accent + "40", borderWidth: 1 }]}>
+          <Text style={[styles.valueText, { color: colors.accent }]}>${totalCollectionValue.toFixed(2)}</Text>
+        </View>
       </View>
 
       {/* Stats */}
@@ -293,10 +176,10 @@ export default function CollectionScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 12 },
+  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 16 },
   title: { fontSize: 26, fontFamily: "Poppins_700Bold" },
-
-  calcWrapper: { paddingHorizontal: 16, marginBottom: 16, gap: 8 },
+  valuePill: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20 },
+  valueText: { fontSize: 16, fontFamily: "Poppins_700Bold" },
 
   statsRow: { flexDirection: "row", paddingHorizontal: 16, gap: 10, marginBottom: 16 },
   statCard: { flex: 1, alignItems: "center", paddingVertical: 14, borderRadius: 14, borderWidth: 1, gap: 3 },
@@ -319,25 +202,4 @@ const styles = StyleSheet.create({
   qtyRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   qtyBtn: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   qty: { fontSize: 13, fontFamily: "Poppins_600SemiBold", minWidth: 26, textAlign: "center" },
-});
-
-const calcStyles = StyleSheet.create({
-  bar: { flexDirection: "row", alignItems: "center", borderRadius: 16, borderWidth: 1, paddingVertical: 12, paddingHorizontal: 16, gap: 12 },
-  totalBlock: { gap: 2 },
-  totalLabel: { fontSize: 9, fontFamily: "Poppins_500Medium", textTransform: "uppercase", letterSpacing: 0.8 },
-  totalAmt: { fontSize: 20, fontFamily: "Poppins_700Bold" },
-  divider: { width: 1, height: 36, marginHorizontal: 4 },
-  btnGroup: { flex: 1, flexDirection: "row", gap: 6, justifyContent: "flex-end" },
-  pctBtn: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, alignItems: "center", justifyContent: "center", minWidth: 42 },
-  pctBtnText: { fontSize: 12, fontFamily: "Poppins_600SemiBold" },
-  result: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 12, paddingVertical: 10, paddingHorizontal: 16, marginTop: 4 },
-  resultLabel: { fontSize: 12, fontFamily: "Poppins_500Medium" },
-  resultAmt: { fontSize: 20, fontFamily: "Poppins_700Bold" },
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center" },
-  modalBox: { width: 280, borderRadius: 20, padding: 24, gap: 16 },
-  modalTitle: { fontSize: 17, fontFamily: "Poppins_600SemiBold", textAlign: "center" },
-  modalInput: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 22, fontFamily: "Poppins_700Bold", textAlign: "center" },
-  modalActions: { flexDirection: "row", gap: 10 },
-  modalBtn: { flex: 1, paddingVertical: 13, borderRadius: 12, alignItems: "center" },
-  modalBtnText: { fontSize: 15, fontFamily: "Poppins_600SemiBold" },
 });
