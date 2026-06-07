@@ -34,9 +34,12 @@ function buildMarketplaceUrls(
   };
 }
 
-// --- In-memory search cache (1 hour TTL, max 500 entries) ---
+// --- In-memory caches ---
+
+const CACHE_TTL = 1000 * 60 * 60; // 1 hour
+
+// Search result cache (query-level, 500 entries)
 const searchCache = new Map<string, { data: any[]; ts: number }>();
-const CACHE_TTL = 1000 * 60 * 60;
 
 function getCached(key: string): any[] | null {
   const hit = searchCache.get(key);
@@ -49,6 +52,58 @@ function setCache(key: string, data: any[]) {
   if (searchCache.size > 500) {
     const oldest = searchCache.keys().next().value;
     if (oldest) searchCache.delete(oldest);
+  }
+}
+
+// One Piece set-level cache — keyed by set code e.g. "OP06"
+// One fetch covers ALL cards in the set; subsequent scans of any card in that set cost 0 API calls
+const opSetCache = new Map<string, { cards: any[]; ts: number }>();
+
+async function getOpSetCards(setCode: string, apiKey: string): Promise<any[]> {
+  const hit = opSetCache.get(setCode);
+  if (hit && Date.now() - hit.ts < CACHE_TTL) {
+    console.log(`[op-set-cache] HIT ${setCode} (${hit.cards.length} cards)`);
+    return hit.cards;
+  }
+  console.log(`[op-set-cache] MISS ${setCode} — fetching from PokéWallet`);
+  // Fetch up to 300 cards per set (most OP sets are ~100-200 cards)
+  const res = await fetch(
+    `${POKEWALLET_BASE}/op/sets/${encodeURIComponent(setCode)}?limit=300`,
+    { headers: pokeHeaders(apiKey) }
+  );
+  if (!res.ok) {
+    console.warn(`[op-set-cache] set fetch failed for ${setCode}: ${res.status}`);
+    return [];
+  }
+  const data = (await res.json()) as any;
+  const cards: any[] = data.data ?? data.cards ?? [];
+  console.log(`[op-set-cache] cached ${cards.length} cards for ${setCode}`);
+  opSetCache.set(setCode, { cards, ts: Date.now() });
+  if (opSetCache.size > 50) {
+    const oldest = opSetCache.keys().next().value;
+    if (oldest) opSetCache.delete(oldest);
+  }
+  return cards;
+}
+
+// Card-level cache for TCGdex individual fetches
+const cardCache = new Map<string, { data: any; ts: number }>();
+
+async function fetchTCGdexCard(id: string): Promise<any | null> {
+  const hit = cardCache.get(id);
+  if (hit && Date.now() - hit.ts < CACHE_TTL) return hit.data;
+  try {
+    const r = await fetch(`${TCGDEX_BASE}/cards/${encodeURIComponent(id)}`);
+    if (!r.ok) return null;
+    const data = await r.json();
+    cardCache.set(id, { data, ts: Date.now() });
+    if (cardCache.size > 1000) {
+      const oldest = cardCache.keys().next().value;
+      if (oldest) cardCache.delete(oldest);
+    }
+    return data;
+  } catch {
+    return null;
   }
 }
 
@@ -86,7 +141,8 @@ function mapPokemonResultFromPokeWallet(card: any): any {
 function mapOnePieceResult(card: any): any {
   const tcg = card.tcgplayer;
   const cm = card.cardmarket;
-  const cardId: string = card.id ?? `op-${card.card_number}`;
+  // Always use the unique ID hash — never fabricate from card_number to avoid key collisions
+  const cardId: string = card.id;
   const name: string = card.name;
   const setName: string = card.card_number?.split("-")[0] ?? "";
   const number: string | null = card.card_number ?? null;
@@ -98,6 +154,7 @@ function mapOnePieceResult(card: any): any {
     set: setName,
     number,
     rarity: card.rarity ?? null,
+    subType: card.sub_type_name ?? null,   // "Normal" | "Foil" — used for variant filtering
     game: "One Piece",
     imageUrl: buildProxyImageUrl(cardId),
     tcg_url: tcg?.url ?? null,
@@ -124,7 +181,6 @@ function mapPokemonResultFromTCGdex(card: any, ocrSetName: string | null): any {
 
   const imageBare: string | undefined = card.image;
   const imageUrl = imageBare ? `${imageBare}/high.webp` : undefined;
-  console.log("[tcgdex] image bare:", imageBare, "-> imageUrl:", imageUrl);
 
   const name: string = card.name;
   const setName: string = card.set?.name ?? ocrSetName ?? "";
@@ -150,10 +206,17 @@ function mapPokemonResultFromTCGdex(card: any, ocrSetName: string | null): any {
 
 // --- OCR ---
 
-async function ocrCard(
-  imageBase64: string,
-  mimeType: string
-): Promise<{ name: string | null; number: string | null; setName: string | null; game: string; confidence: number }> {
+interface OcrResult {
+  name: string | null;
+  number: string | null;
+  setName: string | null;
+  game: string;
+  language: "Japanese" | "English";
+  finish: "Foil" | "Normal";
+  confidence: number;
+}
+
+async function ocrCard(imageBase64: string, mimeType: string): Promise<OcrResult> {
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -185,13 +248,21 @@ Extract the following fields:
    - Pokemon cards have HP, type symbols, evolution stage.
    - One Piece cards have a life/cost number in the top-left circle.
 
+5. LANGUAGE — must be EXACTLY "Japanese" or "English".
+   - "Japanese" if the card contains Japanese characters (hiragana, katakana, or kanji) in the card name or body text.
+   - "English" otherwise.
+
+6. FINISH — must be EXACTLY "Foil" or "Normal".
+   - "Foil" if the card surface shows holographic shimmer, rainbow foil, or metallic shine.
+   - "Normal" if the card has a flat matte or gloss finish with no shimmer.
+
 Respond ONLY with strict JSON (no markdown, no extra text):
-{"name":"Charizard ex","number":"215/197","setName":"Obsidian Flames","game":"Pokemon","confidence":0.95}
+{"name":"Charizard ex","number":"215/197","setName":"Obsidian Flames","game":"Pokemon","language":"English","finish":"Normal","confidence":0.95}
 
 Rules:
 - JSON only, no markdown fences.
 - "number" must include BOTH sides of the slash for Pokemon (e.g. "215/197"), not just one side.
-- Use null for any field you cannot confidently read.
+- Use null for any field you cannot confidently read (except language, finish, game — always return a value for these).
 - confidence: float 0–1 reflecting overall certainty across all fields.`,
           },
           { type: "image_url", image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
@@ -212,6 +283,8 @@ Rules:
     number: parsed.number ?? null,
     setName: parsed.setName ?? null,
     game: parsed.game ?? "Pokemon",
+    language: parsed.language === "Japanese" ? "Japanese" : "English",
+    finish: parsed.finish === "Foil" ? "Foil" : "Normal",
     confidence: parsed.confidence ?? 0.8,
   };
 }
@@ -233,7 +306,7 @@ function normalizeStr(raw: string | null | undefined): string {
   return raw.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-// --- Pokemon lookup via TCGdex — returns ALL matching variants ---
+// --- Pokemon lookup via TCGdex ---
 
 async function lookupPokemonVariantsViaTCGdex(
   name: string,
@@ -279,7 +352,6 @@ async function lookupPokemonVariantsViaTCGdex(
     return [];
   }
 
-  // If setName narrows it to a single card, skip multi-variant logic
   let pool = candidates;
   if (setName && candidates.length > 1) {
     const target = normalizeStr(setName);
@@ -290,13 +362,13 @@ async function lookupPokemonVariantsViaTCGdex(
     if (bySet.length > 0) pool = bySet;
   }
 
-  // Fetch full card data for all candidates in parallel (cap at 10 to avoid hammering)
+  // Cap at 3 — more than 3 variants is overwhelming and rarely correct
   const fetched = await Promise.all(
-    pool.slice(0, 10).map(async (c: any) => {
+    pool.slice(0, 3).map(async (c: any) => {
       try {
-        const r = await fetch(`${TCGDEX_BASE}/cards/${encodeURIComponent(c.id)}`);
-        if (!r.ok) return null;
-        return mapPokemonResultFromTCGdex(await r.json(), setName);
+        const data = await fetchTCGdexCard(c.id);
+        if (!data) return null;
+        return mapPokemonResultFromTCGdex(data, setName);
       } catch {
         return null;
       }
@@ -306,37 +378,111 @@ async function lookupPokemonVariantsViaTCGdex(
   return fetched.filter(Boolean);
 }
 
-// --- One Piece lookup — returns ALL matching variants ---
+// --- One Piece lookup — set-level cache + in-memory filtering ---
 
-async function lookupOnePieceVariants(name: string, number: string | null, apiKey: string): Promise<any[]> {
-  const queries = number ? [number, name] : [name];
-  for (const q of queries) {
+async function lookupOnePieceVariants(
+  name: string,
+  number: string | null,
+  apiKey: string,
+  language: "Japanese" | "English",
+  finish: "Foil" | "Normal"
+): Promise<any[]> {
+  // Parse set code from collector number e.g. "OP06-118" → "OP06"
+  const setCode = number?.match(/^([A-Z]{2}\d{2})-/)?.[1] ?? null;
+
+  let rawCards: any[] = [];
+
+  if (setCode) {
+    // Fetch entire set once — cached for 1 hour
+    const allSetCards = await getOpSetCards(setCode, apiKey);
+
+    // Filter to exact card_number match
+    rawCards = allSetCards.filter((c: any) =>
+      c.card_number?.toUpperCase() === number?.toUpperCase()
+    );
+    console.log(`[op] ${number} in set ${setCode}: ${rawCards.length} variants before filtering`);
+  }
+
+  // Fallback to search if set fetch failed or no number available
+  if (rawCards.length === 0) {
+    const q = number ?? name;
     const res = await fetch(
-      `${POKEWALLET_BASE}/op/search?q=${encodeURIComponent(q)}&limit=10`,
+      `${POKEWALLET_BASE}/op/search?q=${encodeURIComponent(q)}&limit=20`,
       { headers: pokeHeaders(apiKey) }
     );
-    if (!res.ok) continue;
-    const data = (await res.json()) as any;
-    if (!data.data?.length) continue;
-    // Group by card_number — same number = same print, multiple entries = variants
-    const results: any[] = data.data.map(mapOnePieceResult);
-    return results;
+    if (res.ok) {
+      const data = (await res.json()) as any;
+      rawCards = (data.data ?? []).filter((c: any) =>
+        // Drop junk records — must have a valid OP card_number and a real ID
+        c.id &&
+        c.name &&
+        c.card_number &&
+        /^[A-Z]{2}\d{2}-\d{3}/.test(c.card_number) &&
+        (c.tcgplayer?.prices || c.cardmarket?.prices)
+      );
+    }
   }
-  return [];
+
+  if (rawCards.length === 0) return [];
+
+  // --- In-memory filtering using OCR signals ---
+
+  // 1. Language filter
+  const isJapanese = (c: any): boolean => {
+    const n = (c.name ?? "") + (c.clean_name ?? "");
+    // Japanese cards often have "(JP)" in name or purely Japanese characters in clean_name
+    return /[\u3040-\u30ff\u4e00-\u9fff]/.test(n) || n.includes("(JP)") || n.includes("Japanese");
+  };
+
+  let filtered = rawCards;
+  const jpCards = filtered.filter(isJapanese);
+  const enCards = filtered.filter(c => !isJapanese(c));
+
+  if (language === "Japanese" && jpCards.length > 0) {
+    filtered = jpCards;
+    console.log(`[op] language=Japanese → ${filtered.length} variants`);
+  } else if (language === "English" && enCards.length > 0) {
+    filtered = enCards;
+    console.log(`[op] language=English → ${filtered.length} variants`);
+  }
+
+  // 2. Finish filter (Foil / Normal)
+  const foilCards = filtered.filter(c => c.sub_type_name === "Foil");
+  const normalCards = filtered.filter(c => c.sub_type_name === "Normal");
+
+  if (finish === "Foil" && foilCards.length > 0) {
+    filtered = foilCards;
+    console.log(`[op] finish=Foil → ${filtered.length} variants`);
+  } else if (finish === "Normal" && normalCards.length > 0) {
+    filtered = normalCards;
+    console.log(`[op] finish=Normal → ${filtered.length} variants`);
+  }
+
+  // Sort by market value descending so picker shows most valuable first
+  filtered.sort((a, b) => {
+    const aVal = a.tcgplayer?.prices?.market_price ?? a.cardmarket?.prices?.avg ?? 0;
+    const bVal = b.tcgplayer?.prices?.market_price ?? b.cardmarket?.prices?.avg ?? 0;
+    return bVal - aVal;
+  });
+
+  console.log(`[op] final variant count for ${number}: ${filtered.length}`);
+  return filtered.map(mapOnePieceResult);
 }
 
-// --- Unified lookup — always returns an array ---
+// --- Unified lookup ---
 
 async function lookupCardVariants(
   name: string,
   number: string | null,
   game: string,
-  setName: string | null
+  setName: string | null,
+  language: "Japanese" | "English",
+  finish: "Foil" | "Normal"
 ): Promise<any[]> {
   const apiKey = process.env.POKEWALLET_API_KEY;
   if (game.toLowerCase() === "one piece") {
     if (!apiKey) throw new Error("POKEWALLET_API_KEY not set for One Piece");
-    return lookupOnePieceVariants(name, number, apiKey);
+    return lookupOnePieceVariants(name, number, apiKey, language, finish);
   }
   return lookupPokemonVariantsViaTCGdex(name, number, setName);
 }
@@ -347,9 +493,8 @@ async function lookupPriceById(cardId: string): Promise<{ cardId: string; market
   const apiKey = process.env.POKEWALLET_API_KEY;
   try {
     if (!cardId.startsWith("op_") && !cardId.startsWith("op-")) {
-      const res = await fetch(`${TCGDEX_BASE}/cards/${encodeURIComponent(cardId)}`);
-      if (res.ok) {
-        const data = await res.json() as any;
+      const data = await fetchTCGdexCard(cardId);
+      if (data) {
         const tcg = data.pricing?.tcgplayer ?? {};
         const cm = data.pricing?.cardmarket ?? {};
         const tcgVariant = tcg.normal ?? tcg.holofoil ?? tcg["reverse-holofoil"] ?? {};
@@ -370,9 +515,11 @@ async function lookupPriceById(cardId: string): Promise<{ cardId: string; market
     const pick = (prices: any[], field: string) =>
       prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil")?.[field] ??
       prices?.[0]?.[field] ?? undefined;
-    return { cardId, marketValue: isOP
-      ? (data.tcgplayer?.prices?.market_price ?? data.cardmarket?.prices?.avg)
-      : pick(data.tcgplayer?.prices, "market_price") };
+    return {
+      cardId, marketValue: isOP
+        ? (data.tcgplayer?.prices?.market_price ?? data.cardmarket?.prices?.avg)
+        : pick(data.tcgplayer?.prices, "market_price")
+    };
   } catch { return null; }
 }
 
@@ -400,7 +547,7 @@ router.get("/card-image/:id", async (req, res) => {
 
 router.get("/search", async (req, res) => {
   const apiKey = process.env.POKEWALLET_API_KEY;
-  if (!apiKey) { res.status(500).json({ error: "POKEWALLET_API_KEY not set" }); return; }
+  if (!apiKey) { res.status(500).json({ error: "POKEWALLET_API_KEY not set" }); return; }\
   const q = (req.query.q as string ?? "").trim();
   const game = (req.query.game as string ?? "pokemon").toLowerCase();
   const limit = Math.min(Number(req.query.limit ?? 20), 50);
@@ -439,9 +586,10 @@ router.post("/identify-card", upload.single("image"), async (req, res) => {
     if (ocr.confidence < 0.75) { res.status(422).json({ error: "Could not read card clearly", confidence: ocr.confidence }); return; }
     if (ocr.name.trim().length < 2) { res.status(422).json({ error: "Card name too short", confidence: ocr.confidence }); return; }
 
-    const variants = await lookupCardVariants(ocr.name, ocr.number, ocr.game, ocr.setName);
+    const variants = await lookupCardVariants(
+      ocr.name, ocr.number, ocr.game, ocr.setName, ocr.language, ocr.finish
+    );
 
-    // No match at all — return OCR-only stub
     if (variants.length === 0) {
       const { tcg_url, ebay_url } = buildMarketplaceUrls(ocr.name, ocr.setName, ocr.number);
       res.json({
@@ -459,7 +607,6 @@ router.post("/identify-card", upload.single("image"), async (req, res) => {
       return;
     }
 
-    // Always return { variants: [...] } — client decides whether to show picker
     res.json({ variants });
   } catch (err: unknown) {
     console.error("[identify-card] error:", err);
