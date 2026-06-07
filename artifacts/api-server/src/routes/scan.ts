@@ -171,7 +171,7 @@ function mapPokemonResultFromTCGdex(card: any): any {
 async function ocrCard(
   imageBase64: string,
   mimeType: string
-): Promise<{ name: string | null; number: string | null; game: string; confidence: number }> {
+): Promise<{ name: string | null; number: string | null; setName: string | null; game: string; confidence: number }> {
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -192,18 +192,19 @@ From the image, determine:
 2. COLLECTOR NUMBER
    - Pokemon: typically like "215/197", "001/165", etc.
    - One Piece: like "OP01-001", "OP05-060", etc.
-3. GAME: must be EXACTLY one of "Pokemon" or "One Piece".
+3. SET NAME (for Pokemon: the expansion name, e.g. "Obsidian Flames", "Paldean Fates". For One Piece: the set name like "Romance Dawn".)
+4. GAME: must be EXACTLY one of "Pokemon" or "One Piece".
 
 Use card layout cues:
 - Pokemon collector number is usually bottom-left of the artwork frame.
 - One Piece collector number is usually bottom-right.
 
 Respond ONLY with strict JSON, no markdown:
-{"name":"Charizard ex","number":"215/197","game":"Pokemon","confidence":0.95}
+{"name":"Charizard ex","number":"215/197","setName":"Obsidian Flames","game":"Pokemon","confidence":0.95}
 
 Rules:
 - JSON only.
-- Use null for name/number if unreadable.
+- Use null for name/number/setName if unreadable.
 - NEVER guess the game; if truly unclear, set "game":"Pokemon" only if the layout clearly matches Pokemon, otherwise "One Piece" if it clearly matches that layout.
 - confidence is a number between 0 and 1 indicating how sure you are.`,
           },
@@ -223,6 +224,7 @@ Rules:
   return {
     name: parsed.name ?? null,
     number: parsed.number ?? null,
+    setName: parsed.setName ?? null,
     game: parsed.game ?? "Pokemon",
     confidence: parsed.confidence ?? 0.8,
   };
@@ -294,6 +296,14 @@ function parsePokemonCollectorNumber(raw: string | null): { local?: number; tota
   return { local, total };
 }
 
+function normalizeSetName(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 // --- Scan lookups ---
 
 async function lookupOnePieceCard(name: string, number: string | null, apiKey: string): Promise<any> {
@@ -311,7 +321,7 @@ async function lookupOnePieceCard(name: string, number: string | null, apiKey: s
   return null;
 }
 
-async function lookupPokemonCardViaTCGdex(name: string, number: string | null): Promise<any> {
+async function lookupPokemonCardViaTCGdex(name: string, number: string | null, setName: string | null): Promise<any> {
   await ensureTCGDexCacheLoaded();
   if (!tcgdexCards || !tcgdexSets) throw new Error("TCGdex cache not loaded");
 
@@ -331,18 +341,26 @@ async function lookupPokemonCardViaTCGdex(name: string, number: string | null): 
   }
 
   if (candidates.length === 0) {
-    console.log("[tcgdex] no candidates for name:", normalizedName, "number:", number);
+    console.log("[tcgdex] no candidates for name:", normalizedName, "number:", number, "setName:", setName);
     return null;
   }
 
-  // 2. If we have a local and total, use both.
+  // 2. If we have a local and total, use both plus setName (if available).
   if (local && total) {
-    // Find sets whose total card count matches the denominator on the card.
-    const matchingSetIds = new Set(
-      tcgdexSets
-        .filter((s) => s.cardCount && s.cardCount.total === total)
-        .map((s) => s.id)
-    );
+    let matchingSets = tcgdexSets.filter((s) => s.cardCount && s.cardCount.total === total);
+
+    if (setName) {
+      const target = normalizeSetName(setName);
+      const bySetName = matchingSets.filter((s) => {
+        const norm = normalizeSetName(s.name);
+        return norm === target || norm.includes(target) || target.includes(norm);
+      });
+      if (bySetName.length > 0) {
+        matchingSets = bySetName;
+      }
+    }
+
+    const matchingSetIds = new Set(matchingSets.map((s) => s.id));
 
     const narrowed = candidates.filter((c) => {
       const setId = c.set?.id;
@@ -357,14 +375,24 @@ async function lookupPokemonCardViaTCGdex(name: string, number: string | null): 
     } else if (narrowed.length > 1) {
       console.log(
         "[tcgdex] multiple candidates after set+local filter, picking first",
-        { name: normalizedName, number, narrowed: narrowed.map((c) => c.id) }
+        { name: normalizedName, number, setName, narrowed: narrowed.map((c) => c.id) }
       );
       candidates = narrowed;
     } else {
       console.log(
         "[tcgdex] no candidates after set+local filter, falling back to name-only",
-        { name: normalizedName, number }
+        { name: normalizedName, number, setName }
       );
+    }
+  } else if (setName && candidates.length > 1) {
+    // If we don't have full collector number but do have setName, use it to narrow candidates.
+    const target = normalizeSetName(setName);
+    const bySetName = candidates.filter((c) => {
+      const norm = normalizeSetName(c.set?.name);
+      return norm === target || norm.includes(target) || target.includes(norm);
+    });
+    if (bySetName.length > 0) {
+      candidates = bySetName;
     }
   }
 
@@ -378,7 +406,7 @@ async function lookupPokemonCardViaTCGdex(name: string, number: string | null): 
   return mapPokemonResultFromTCGdex(fullCard);
 }
 
-async function lookupCard(name: string, number: string | null, game: string): Promise<any> {
+async function lookupCard(name: string, number: string | null, game: string, setName: string | null): Promise<any> {
   const apiKey = process.env.POKEWALLET_API_KEY;
   const normalized = game.toLowerCase();
 
@@ -388,7 +416,7 @@ async function lookupCard(name: string, number: string | null, game: string): Pr
   }
 
   // Default: treat as Pokemon and use free TCGdex
-  return lookupPokemonCardViaTCGdex(name, number);
+  return lookupPokemonCardViaTCGdex(name, number, setName);
 }
 
 // --- Price refresh ---
@@ -522,7 +550,7 @@ router.post("/identify-card", upload.single("image"), async (req, res) => {
       return;
     }
 
-    const card = await lookupCard(ocr.name, ocr.number, ocr.game);
+    const card = await lookupCard(ocr.name, ocr.number, ocr.game, ocr.setName);
     if (!card) {
       res.json({
         cardId: `ocr-${Date.now()}`,
