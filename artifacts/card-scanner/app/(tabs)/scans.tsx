@@ -14,8 +14,9 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { CardDetailModal } from "@/components/CardDetailModal";
 import { CardListItem } from "@/components/CardListItem";
-import { LIST_COLORS, ScanList, useScanContext } from "@/context/ScanContext";
+import { LIST_COLORS, ScanItem, ScanList, useScanContext } from "@/context/ScanContext";
 import { useColors } from "@/hooks/useColors";
 
 const PRESETS = [70, 80, 85];
@@ -131,6 +132,7 @@ export default function ScansScreen() {
   const [showNewList, setShowNewList] = useState(false);
   const [newListName, setNewListName] = useState("");
   const [newListColor, setNewListColor] = useState(LIST_COLORS[0]);
+  const [selectedScan, setSelectedScan] = useState<ScanItem | null>(null);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 + 84 : insets.bottom + 90;
@@ -246,6 +248,7 @@ export default function ScansScreen() {
           <CardListItem
             card={item.card}
             subtitle={formatDate(item.scannedAt)}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedScan(item); }}
             onLongPress={() => handleDeleteScan(item.id)}
           />
         )}
@@ -275,9 +278,9 @@ export default function ScansScreen() {
                     <Pressable
                       hitSlop={12}
                       onPress={() => handleDeleteList(list)}
-                      style={[styles.dropDeleteBtn, { backgroundColor: colors.destructive + "20" }]}
+                      style={[styles.dropDeleteBtn, { backgroundColor: colors.danger + "20" }]}
                     >
-                      <Ionicons name="trash-outline" size={14} color={colors.destructive} />
+                      <Ionicons name="trash-outline" size={14} color={colors.danger} />
                     </Pressable>
                   )}
                 </Pressable>
@@ -330,6 +333,13 @@ export default function ScansScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Card detail modal */}
+      <CardDetailModal
+        visible={!!selectedScan}
+        card={selectedScan?.card ?? null}
+        onClose={() => setSelectedScan(null)}
+      />
     </View>
   );
 }

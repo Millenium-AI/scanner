@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Platform,
@@ -14,6 +15,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { CardDetailModal } from "@/components/CardDetailModal";
 import { CardListItem } from "@/components/CardListItem";
 import { CollectionCard, useScanContext } from "@/context/ScanContext";
 import { useColors } from "@/hooks/useColors";
@@ -35,6 +37,7 @@ export default function CollectionScreen() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("recent");
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedCard, setSelectedCard] = useState<CollectionCard | null>(null);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 + 84 : insets.bottom + 90;
@@ -74,7 +77,7 @@ export default function CollectionScreen() {
   };
 
   const handleRemove = (item: CollectionCard) => {
-    Alert.alert("Remove Card", `Remove "${item.card.name}" from collection?`, [
+    Alert.alert("Remove Card", `Remove \"${item.card.name}\" from collection?`, [
       { text: "Cancel", style: "cancel" },
       { text: "Remove", style: "destructive", onPress: () => { removeFromCollection(item.id); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } },
     ]);
@@ -92,6 +95,12 @@ export default function CollectionScreen() {
       {/* Header */}
       <View style={styles.headerRow}>
         <Text style={[styles.title, { color: colors.foreground }]}>Collection</Text>
+        {refreshing && (
+          <View style={styles.refreshBadge}>
+            <ActivityIndicator size="small" color={colors.accent} />
+            <Text style={[styles.refreshLabel, { color: colors.accent }]}>Updating prices\u2026</Text>
+          </View>
+        )}
       </View>
 
       {/* Stats */}
@@ -174,6 +183,7 @@ export default function CollectionScreen() {
           <CardListItem
             card={item.card}
             subtitle={`${item.card.game} \u00b7 ${item.card.set}`}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setSelectedCard(item); }}
             rightContent={
               <View style={styles.qtyRow}>
                 <Pressable style={[styles.qtyBtn, { backgroundColor: colors.surface }]} onPress={() => handleQtyChange(item, -1)}>
@@ -189,6 +199,22 @@ export default function CollectionScreen() {
           />
         )}
       />
+
+      {/* Card detail modal */}
+      <CardDetailModal
+        visible={!!selectedCard}
+        card={selectedCard?.card ?? null}
+        onClose={() => setSelectedCard(null)}
+        extraInfo={
+          selectedCard ? (
+            <View style={styles.qtyBadge}>
+              <Text style={[styles.qtyBadgeText, { color: colors.foreground }]}>
+                \u00d7{selectedCard.quantity} in collection
+              </Text>
+            </View>
+          ) : undefined
+        }
+      />
     </View>
   );
 }
@@ -197,6 +223,8 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 16 },
   title: { fontSize: 26, fontFamily: "Poppins_700Bold" },
+  refreshBadge: { flexDirection: "row", alignItems: "center", gap: 6 },
+  refreshLabel: { fontSize: 12, fontFamily: "Poppins_500Medium" },
 
   statsRow: { flexDirection: "row", paddingHorizontal: 16, gap: 10, marginBottom: 16 },
   statCard: { flex: 1, alignItems: "center", paddingVertical: 14, borderRadius: 14, borderWidth: 1, gap: 3 },
@@ -219,4 +247,7 @@ const styles = StyleSheet.create({
   qtyRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   qtyBtn: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   qty: { fontSize: 13, fontFamily: "Poppins_600SemiBold", minWidth: 26, textAlign: "center" },
+
+  qtyBadge: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.08)" },
+  qtyBadgeText: { fontSize: 13, fontFamily: "Poppins_500Medium" },
 });
