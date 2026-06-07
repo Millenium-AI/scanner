@@ -358,7 +358,8 @@ function NativeScannerScreen() {
 
       {/* Bottom controls */}
       <View style={[styles.nativeBottom, { paddingBottom: insets.bottom + 90 }]}>
-        <Pressable style={styles.nativeUpload} onPress={handleUpload} disabled={scanState === "scanning"}>
+        <Pressable style={styles.nativeUpload} onPress={handleUpload} disabled={scanState === "scanning"}
+        >
           <Ionicons name="image-outline" size={22} color="rgba(255,255,255,0.7)" />
         </Pressable>
 
@@ -401,11 +402,11 @@ function NativeScannerScreen() {
 
 export default function ScannerScreen() {
   if (Platform.OS === "web") return <WebScannerScreen />;
-  return <NativeScannerScreen />;
+  return <NativeScannerScreen />
 }
 
-const FRAME_W = 260;
-const FRAME_H = 364;
+const FRAME_W = 300;
+const FRAME_H = 420;
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
