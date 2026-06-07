@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { openURL } from "expo-linking";
 import React from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -52,6 +53,13 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     addScan(result);
     onClose();
+  };
+
+  const handleTCGPlayer = () => {
+    if ((result as any).tcg_url) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      openURL((result as any).tcg_url);
+    }
   };
 
   return (
@@ -128,6 +136,13 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
                     Save to {activeList?.name ?? "Scans"}
                   </Text>
                 </Pressable>
+
+                {(result as any).tcg_url && (
+                  <Pressable style={[styles.btn, styles.btnSecondary, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleTCGPlayer}>
+                    <Ionicons name="open-outline" size={18} color={colors.foreground} />
+                    <Text style={[styles.btnText, { color: colors.foreground }]}>View on TCGplayer</Text>
+                  </Pressable>
+                )}
 
                 <Pressable style={[styles.btn, styles.btnGhost, { borderColor: colors.border }]} onPress={onScanAgain}>
                   <Ionicons name="scan" size={18} color={colors.mutedForeground} />
