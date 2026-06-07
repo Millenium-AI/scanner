@@ -2,7 +2,11 @@ import { CardScanResult } from "@/context/ScanContext";
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 
-export async function identifyCard(imageUri: string): Promise<CardScanResult> {
+export type IdentifyResult =
+  | { type: "single"; card: CardScanResult }
+  | { type: "variants"; cards: CardScanResult[] };
+
+export async function identifyCard(imageUri: string): Promise<IdentifyResult> {
   const formData = new FormData();
 
   const filename = imageUri.split("/").pop() ?? "scan.jpg";
@@ -29,5 +33,11 @@ export async function identifyCard(imageUri: string): Promise<CardScanResult> {
   }
 
   const data = await response.json();
-  return data as CardScanResult;
+
+  // Backend returns { variants: [...] } when multiple cards share the same name + number
+  if (Array.isArray(data.variants) && data.variants.length > 1) {
+    return { type: "variants", cards: data.variants };
+  }
+
+  return { type: "single", card: data.variants?.[0] ?? data };
 }
