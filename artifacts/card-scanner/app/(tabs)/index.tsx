@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  Image,
   Modal,
   Platform,
   Pressable,
@@ -31,39 +32,35 @@ let useCameraPermissions: (() => [
   () => Promise<void>
 ]) | null = null;
 
-let detectRectangle: ((uri: string) => Promise<boolean>) | null = null;
+// On-device rectangle detection: check if the captured photo has a card-like
+// aspect ratio (portrait 1.28–1.60 or landscape 0.625–0.78).
+// Uses RN's Image.getSize — no server round-trip needed.
+function hasCardAspectRatio(uri: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    Image.getSize(
+      uri,
+      (width, height) => {
+        if (width === 0 || height === 0) { resolve(true); return; }
+        const ratio = height / width;
+        const portrait  = ratio >= 1.28 && ratio <= 1.60;
+        const landscape = ratio >= 0.625 && ratio <= 0.78;
+        const pass = portrait || landscape;
+        console.log(`[rectGate] ${width}x${height} ratio=${ratio.toFixed(3)} pass=${pass}`);
+        resolve(pass);
+      },
+      () => {
+        // getSize failed — allow the frame through so we don't silently drop
+        console.warn("[rectGate] getSize failed, allowing frame");
+        resolve(true);
+      }
+    );
+  });
+}
 
 if (Platform.OS !== "web") {
   const cam = require("expo-camera");
   CameraView = cam.CameraView;
   useCameraPermissions = cam.useCameraPermissions;
-
-  detectRectangle = async (uri: string): Promise<boolean> => {
-    try {
-      const BACKEND_URL =
-        process.env.EXPO_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
-      const formData = new FormData();
-      const filename = uri.split("/").pop() ?? "frame.jpg";
-      const match = /\.(\w+)$/.exec(filename);
-      const type = match ? `image/${match[1]}` : "image/jpeg";
-      formData.append("image", { uri, name: filename, type } as unknown as Blob);
-      const res = await fetch(`${BACKEND_URL}/detect-rectangle`, {
-        method: "POST",
-        body: formData,
-        headers: { Accept: "application/json" },
-      });
-      if (!res.ok) {
-        console.warn("[detectRectangle] server returned", res.status, "— skipping frame");
-        return false;
-      }
-      const data = await res.json();
-      console.log("[detectRectangle] result:", data.hasRectangle);
-      return data.hasRectangle === true;
-    } catch (err) {
-      console.warn("[detectRectangle] network error — skipping frame:", err);
-      return false;
-    }
-  };
 }
 
 type ScanState = "idle" | "scanning" | "success" | "error";
@@ -302,7 +299,9 @@ function NativeScannerScreen() {
     }
   }, []);
 
-  // ─── Auto-scan loop: every 3 seconds ─────────────────────────────────────
+  // ─── Auto-scan loop: capture every 3 seconds ──────────────────────────────
+  // Gate 1: on-device aspect ratio check (no server call)
+  // Gate 2: OCR confidence threshold (checked after identify-card responds)
   useEffect(() => {
     const interval = setInterval(async () => {
       if (showResultRef.current) return;
@@ -314,7 +313,7 @@ function NativeScannerScreen() {
       inflightRef.current = true;
 
       try {
-        // Step 1: capture frame at consistent quality
+        // Step 1: capture frame
         let photo: { uri: string } | null = null;
         try {
           photo = await (cameraRef.current as any).takePictureAsync({
@@ -329,20 +328,20 @@ function NativeScannerScreen() {
         }
 
         if (!photo?.uri) {
-          console.warn("[auto-scan] no URI returned from takePictureAsync");
+          console.warn("[auto-scan] no URI from takePictureAsync");
           inflightRef.current = false;
           return;
         }
 
-        // Step 2: rectangle gate
-        const hasRect = detectRectangle ? await detectRectangle(photo.uri) : true;
+        // Step 2: on-device aspect ratio gate (replaces server detect-rectangle)
+        const hasRect = await hasCardAspectRatio(photo.uri);
         if (!hasRect) {
-          console.log("[auto-scan] no rectangle detected, discarding frame");
+          console.log("[auto-scan] aspect ratio not card-like, discarding frame");
           inflightRef.current = false;
           return;
         }
 
-        // Step 3: OCR + lookup (inflightRef released inside runIdentify finally)
+        // Step 3: OCR + lookup
         await runIdentify(photo.uri, true);
       } catch (err) {
         console.warn("[auto-scan] unexpected error:", err);
@@ -353,7 +352,7 @@ function NativeScannerScreen() {
     return () => clearInterval(interval);
   }, [runIdentify]);
 
-  // Manual capture — skips rectangle gate
+  // Manual capture — skips aspect ratio gate (user intent is explicit)
   const handleCapture = async () => {
     if (scanState === "scanning" || !cameraRef.current) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);

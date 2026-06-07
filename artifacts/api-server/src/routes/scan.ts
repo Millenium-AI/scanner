@@ -27,7 +27,7 @@ function buildProxyImageUrl(cardId: string): string {
 function buildMarketplaceUrls(
   name: string,
   setName: string | null,
-  number: string | null  // full "NNN/TTT" format
+  number: string | null
 ) {
   const tcgTerms = [name, setName, number].filter(Boolean).join(" ");
   const ebayTerms = [name, setName, number, "pokemon card"].filter(Boolean).join(" ");
@@ -78,7 +78,6 @@ function mapPokemonResultFromPokeWallet(card: any): any {
     number,
     rarity: info.rarity ?? null,
     game: "Pokemon",
-    // PokeWallet Pokemon: use proxy (no TCGdex id available)
     imageUrl: buildProxyImageUrl(cardId),
     tcg_url: tcg?.url ?? tcg_url,
     ebay_url,
@@ -113,6 +112,7 @@ function mapOnePieceResult(card: any): any {
 }
 
 // TCGdex mapper — images come directly from TCGdex CDN
+// Format per docs: {base}/{quality}.{extension}  e.g. /high.webp
 function mapPokemonResultFromTCGdex(card: any, ocrSetName: string | null): any {
   const cardId: string = card.id;
   const pricing = card.pricing ?? {};
@@ -127,11 +127,11 @@ function mapPokemonResultFromTCGdex(card: any, ocrSetName: string | null): any {
         ? cm.avg
         : undefined;
 
-  // TCGdex image: card.image is a bare URL like
-  // https://assets.tcgdex.net/en/sv/sv3/215
-  // Append /high/webp for the full-resolution WebP variant.
+  // TCGdex returns bare URL e.g. https://assets.tcgdex.net/en/sv/sv3/215
+  // Correct format: {base}/{quality}.{extension} — note the DOT, not slash
   const imageBare: string | undefined = card.image;
-  const imageUrl = imageBare ? `${imageBare}/high/webp` : undefined;
+  const imageUrl = imageBare ? `${imageBare}/high.webp` : undefined;
+  console.log("[tcgdex] image bare:", imageBare, "-> imageUrl:", imageUrl);
 
   const name: string = card.name;
   const setName: string = card.set?.name ?? ocrSetName ?? "";
@@ -149,7 +149,6 @@ function mapPokemonResultFromTCGdex(card: any, ocrSetName: string | null): any {
     tcg_url,
     ebay_url,
     marketValue,
-    // Cardmarket trend data for the detail sheet
     cardmarket_trend: typeof cm.trend === "number" ? cm.trend : undefined,
     cardmarket_avg7: typeof cm.avg7 === "number" ? cm.avg7 : undefined,
     confidence: 1.0,
@@ -222,56 +221,6 @@ Rules:
     game: parsed.game ?? "Pokemon",
     confidence: parsed.confidence ?? 0.8,
   };
-}
-
-// --- Rectangle detection ---
-
-function detectRectangleInBuffer(buffer: Buffer): boolean {
-  let width = 0;
-  let height = 0;
-
-  if (buffer[0] === 0xff && buffer[1] === 0xd8) {
-    let i = 2;
-    while (i < buffer.length - 8) {
-      if (buffer[i] !== 0xff) { i++; continue; }
-      const marker = buffer[i + 1];
-      const len = buffer.readUInt16BE(i + 2);
-      if (
-        (marker >= 0xc0 && marker <= 0xc3) ||
-        (marker >= 0xc5 && marker <= 0xc7) ||
-        (marker >= 0xc9 && marker <= 0xcb) ||
-        (marker >= 0xcd && marker <= 0xcf)
-      ) {
-        height = buffer.readUInt16BE(i + 5);
-        width = buffer.readUInt16BE(i + 7);
-        break;
-      }
-      i += 2 + len;
-    }
-  }
-
-  if (width === 0 || height === 0) {
-    console.log("[detect-rectangle] could not parse dimensions, allowing");
-    return true;
-  }
-
-  const ratio = height / width;
-  const portraitCard = ratio >= 1.28 && ratio <= 1.60;
-  const landscapeCard = ratio >= 0.625 && ratio <= 0.78;
-
-  if (!portraitCard && !landscapeCard) {
-    console.log(`[detect-rectangle] ratio ${ratio.toFixed(3)} out of range — skip`);
-    return false;
-  }
-
-  const bpp = buffer.length / (width * height);
-  if (bpp < 0.04) {
-    console.log(`[detect-rectangle] bpp ${bpp.toFixed(4)} too low — skip`);
-    return false;
-  }
-
-  console.log(`[detect-rectangle] PASS ratio=${ratio.toFixed(3)} bpp=${bpp.toFixed(4)}`);
-  return true;
 }
 
 // --- Parse collector number ---
@@ -357,8 +306,6 @@ async function lookupPokemonCardViaTCGdex(
   if (!fullRes.ok) throw new Error(`TCGdex card fetch failed (${fullRes.status}) id=${picked.id}`);
   const fullCard = await fullRes.json();
 
-  console.log("[tcgdex] image field:", fullCard.image);
-
   return mapPokemonResultFromTCGdex(fullCard, setName);
 }
 
@@ -441,11 +388,6 @@ router.get("/card-image/:id", async (req, res) => {
     console.error("card-image proxy error:", err);
     res.status(500).json({ error: "Failed to fetch image" });
   }
-});
-
-router.post("/detect-rectangle", upload.single("image"), (req, res) => {
-  if (!req.file) { res.status(400).json({ error: "No image provided" }); return; }
-  res.json({ hasRectangle: detectRectangleInBuffer(req.file.buffer) });
 });
 
 router.get("/search", async (req, res) => {
