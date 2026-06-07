@@ -5,7 +5,7 @@ const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 const POKEWALLET_BASE = "https://api.pokewallet.io";
-const PTCG_BASE = "https://api.pokemontcg.io/v2";
+const TCGDEX_BASE = "https://api.tcgdex.net/v2";
 
 // --- Helpers ---
 
@@ -13,6 +13,8 @@ function pokeHeaders(apiKey: string) {
   return { "X-API-Key": apiKey, Authorization: `Bearer ${apiKey}` };
 }
 
+// Builds a proxied image URL for PokeWallet cards (scans + One Piece).
+// TCGdex cards use public CDN URLs directly — no proxy needed.
 function buildImageUrl(cardId: string): string {
   const base =
     process.env.BACKEND_PUBLIC_URL ??
@@ -21,9 +23,9 @@ function buildImageUrl(cardId: string): string {
   return `${base}/card-image/${encodeURIComponent(cardId)}`;
 }
 
-// In-memory cache to avoid burning API quota on repeated searches
+// --- In-memory cache (1 hour TTL, max 500 entries) ---
 const searchCache = new Map<string, { data: any[]; ts: number }>();
-const CACHE_TTL = 1000 * 60 * 60; // 1 hour
+const CACHE_TTL = 1000 * 60 * 60;
 
 function getCached(key: string): any[] | null {
   const hit = searchCache.get(key);
@@ -33,63 +35,59 @@ function getCached(key: string): any[] | null {
 
 function setCache(key: string, data: any[]) {
   searchCache.set(key, { data, ts: Date.now() });
-  // Prevent unbounded growth
   if (searchCache.size > 500) {
     const oldest = searchCache.keys().next().value;
     if (oldest) searchCache.delete(oldest);
   }
 }
 
-// --- Pokemon TCG API mapper ---
-// Uses pokemontcg.io: 20,000 req/day free, images are public CDN (no proxy needed)
-
-function mapPTCGResult(card: any): any {
-  const tcg = card.tcgplayer;
-  const prices = tcg?.prices ?? {};
-
-  // Pick best available price variant
-  const priceVariants = ["holofoil", "reverseHolofoil", "normal", "1stEditionHolofoil"];
+// --- TCGdex mapper (Pokemon search only) ---
+// TCGdex is free, no API key, 130k+ cards, public CDN images, Cardmarket prices.
+// Docs: https://tcgdex.dev
+function mapTCGdexResult(card: any): any {
+  const variants = card.variants ?? {};
+  // Pick best available price from Cardmarket (EUR) or fallback
+  const priceVariants = ["holo", "reverse", "normal", "firstEdition"];
   let marketValue: number | undefined;
-  let priceType: string | undefined;
+  let foilType: string | undefined;
+
+  const foilLabels: Record<string, string> = {
+    holo: "Holofoil",
+    reverse: "Reverse Holofoil",
+    normal: "Normal",
+    firstEdition: "1st Edition",
+  };
 
   for (const v of priceVariants) {
-    if (prices[v]?.market) {
-      marketValue = prices[v].market;
-      priceType = v;
+    const price = variants[v]?.averageSellPrice ?? variants[v]?.lowPrice;
+    if (price) {
+      marketValue = price;
+      foilType = foilLabels[v] ?? v;
       break;
     }
   }
 
-  // Map foil type to display label
-  const foilLabels: Record<string, string> = {
-    holofoil: "Holofoil",
-    reverseHolofoil: "Reverse Holofoil",
-    normal: "Normal",
-    "1stEditionHolofoil": "1st Edition Holofoil",
-    "1stEditionNormal": "1st Edition Normal",
-  };
-  const foilLabel = priceType ? (foilLabels[priceType] ?? priceType) : undefined;
+  // TCGdex image base URL + quality suffix. Public CDN, no auth needed.
+  const imageUrl = card.image ? `${card.image}/low.webp` : null;
+  const imageUrlLarge = card.image ? `${card.image}/high.webp` : null;
 
   return {
-    cardId: card.id,
+    cardId: `tcgdex-${card.id}`,
     name: card.name,
     set: card.set?.name ?? "",
-    setId: card.set?.id ?? "",
-    number: card.number ?? null,
+    number: card.localId ?? null,
     rarity: card.rarity ?? null,
     game: "Pokemon",
-    // PTCG image URLs are public CDN - no auth proxy needed, saves PokeWallet quota
-    imageUrl: card.images?.small ?? card.images?.large ?? null,
-    imageUrlLarge: card.images?.large ?? null,
-    tcg_url: tcg?.url ?? null,
+    imageUrl,
+    imageUrlLarge,
+    tcg_url: null,
     marketValue,
-    foilType: foilLabel,
-    language: "English",
+    foilType,
     confidence: 1.0,
   };
 }
 
-// --- PokeWallet result mappers (used for One Piece + scan lookups) ---
+// --- PokeWallet result mappers (scans + One Piece search) ---
 
 function mapPokemonResult(best: any): any {
   const info = best.card_info;
@@ -181,7 +179,7 @@ Rules: JSON only, use null if unreadable, NEVER guess.`,
   };
 }
 
-// --- Scan lookups (PokeWallet - 1 call per scan, acceptable) ---
+// --- Scan lookups (PokeWallet - 1 call per scan) ---
 
 async function lookupOnePieceCard(name: string, number: string | null, apiKey: string): Promise<any> {
   const queries = number ? [number, name] : [name];
@@ -217,7 +215,7 @@ async function lookupCard(name: string, number: string | null, game: string): Pr
   return lookupPokemonCard(name, number, apiKey);
 }
 
-// --- Price refresh ---
+// --- Price refresh (PokeWallet) ---
 
 async function lookupPriceById(cardId: string): Promise<{ cardId: string; marketValue?: number } | null> {
   const apiKey = process.env.POKEWALLET_API_KEY;
@@ -242,8 +240,9 @@ async function lookupPriceById(cardId: string): Promise<{ cardId: string; market
 
 // --- Routes ---
 
-// GET /card-image/:id  — proxies PokeWallet images (One Piece + scan results)
-// Pokemon search results use PTCG public CDN directly, no proxy needed
+// GET /card-image/:id
+// Proxies PokeWallet images for scan results and One Piece cards.
+// TCGdex Pokemon search cards use public CDN directly — this route not needed for those.
 router.get("/card-image/:id", async (req, res) => {
   const apiKey = process.env.POKEWALLET_API_KEY;
   if (!apiKey) { res.status(500).json({ error: "API key not configured" }); return; }
@@ -265,12 +264,12 @@ router.get("/card-image/:id", async (req, res) => {
 });
 
 // GET /search?q=charizard&game=pokemon&lang=en&limit=20
-// Pokemon -> Pokemon TCG API (20k/day free, public image CDN, cached 1hr)
-// One Piece -> PokeWallet (only option)
+// Pokemon  -> TCGdex (free, no key, public CDN images, Cardmarket prices, cached 1hr)
+// One Piece -> PokeWallet (only available source)
 router.get("/search", async (req, res) => {
   const q = (req.query.q as string ?? "").trim();
   const game = (req.query.game as string ?? "pokemon").toLowerCase();
-  const lang = (req.query.lang as string ?? "en").toLowerCase(); // en | ja | all
+  const lang = (req.query.lang as string ?? "en").toLowerCase();
   const limit = Math.min(Number(req.query.limit ?? 20), 50);
 
   if (!q) { res.json([]); return; }
@@ -293,22 +292,15 @@ router.get("/search", async (req, res) => {
       setCache(cacheKey, results);
       res.json(results);
     } else {
-      // Pokemon TCG API - no API key required for basic use, 20k/day
-      const ptcgKey = process.env.PTCG_API_KEY ?? ""; // optional but raises rate limit
-      const headers: Record<string, string> = {};
-      if (ptcgKey) headers["X-Api-Key"] = ptcgKey;
-
-      // Build query: support name + optional lang filter
-      let ptcgQ = `name:"${q}"`;
-      if (lang === "ja") ptcgQ += " set.series:Japanese";
-
+      // TCGdex: free, no API key, 130k+ cards, Cardmarket prices, public CDN images
+      const langCode = lang === "ja" ? "ja" : "en";
       const upstream = await fetch(
-        `${PTCG_BASE}/cards?q=${encodeURIComponent(ptcgQ)}&orderBy=-set.releaseDate&pageSize=${limit}&select=id,name,number,rarity,set,images,tcgplayer`,
-        { headers }
+        `${TCGDEX_BASE}/${langCode}/cards?name=${encodeURIComponent(q)}&pagination[page]=1&pagination[itemsPerPage]=${limit}`,
+        { headers: { "Accept": "application/json" } }
       );
       if (!upstream.ok) { res.status(upstream.status).json({ error: "Search failed" }); return; }
-      const data = (await upstream.json()) as any;
-      const results = (data.data ?? []).map(mapPTCGResult);
+      const data = (await upstream.json()) as any[];
+      const results = (Array.isArray(data) ? data : []).map(mapTCGdexResult);
       setCache(cacheKey, results);
       res.json(results);
     }
