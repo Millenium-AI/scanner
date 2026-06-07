@@ -7,60 +7,10 @@ const upload = multer({ storage: multer.memoryStorage() });
 const POKEWALLET_BASE = "https://api.pokewallet.io";
 const TCGDEX_BASE = "https://api.tcgdex.net/v2/en";
 
-// --- TCGdex cache ---
-
-type TCGdexSetBrief = {
-  id: string;
-  name: string;
-  cardCount?: { total?: number };
-};
-
-type TCGdexCardBrief = {
-  id: string;
-  localId?: string | number;
-  name: string;
-  set?: { id: string; name: string };
-};
-
-let tcgdexCards: TCGdexCardBrief[] | null = null;
-let tcgdexSets: TCGdexSetBrief[] | null = null;
-let tcgdexCacheTs: number | null = null;
-
-const TCGDEX_CACHE_TTL_MS = 1000 * 60 * 60 * 6; // 6 hours
-
-async function ensureTCGDexCacheLoaded() {
-  const now = Date.now();
-  if (tcgdexCards && tcgdexSets && tcgdexCacheTs && now - tcgdexCacheTs < TCGDEX_CACHE_TTL_MS) {
-    return;
-  }
-
-  const [cardsRes, setsRes] = await Promise.all([
-    fetch(`${TCGDEX_BASE}/cards`),
-    fetch(`${TCGDEX_BASE}/sets`),
-  ]);
-
-  if (!cardsRes.ok) throw new Error(`TCGdex /cards failed (${cardsRes.status})`);
-  if (!setsRes.ok) throw new Error(`TCGdex /sets failed (${setsRes.status})`);
-
-  tcgdexCards = (await cardsRes.json()) as TCGdexCardBrief[];
-  tcgdexSets = (await setsRes.json()) as TCGdexSetBrief[];
-  tcgdexCacheTs = now;
-
-  console.log(`[tcgdex] cache loaded: ${tcgdexCards.length} cards, ${tcgdexSets.length} sets`);
-}
-
 // --- Helpers ---
 
 function pokeHeaders(apiKey: string) {
   return { "X-API-Key": apiKey, Authorization: `Bearer ${apiKey}` };
-}
-
-function buildImageUrl(cardId: string): string {
-  const base =
-    process.env.BACKEND_PUBLIC_URL ??
-    process.env.EXPO_PUBLIC_BACKEND_URL ??
-    "http://localhost:8000";
-  return `${base}/card-image/${encodeURIComponent(cardId)}`;
 }
 
 // --- In-memory search cache (1 hour TTL, max 500 entries) ---
@@ -81,35 +31,7 @@ function setCache(key: string, data: any[]) {
   }
 }
 
-// --- PokeWallet result mappers ---
-
-function mapPokemonResultFromPokeWallet(card: any): any {
-  const info = card.card_info;
-  const tcg = card.tcgplayer;
-  const cardId: string = card.id;
-
-  const pick = (prices: any[], field: string) =>
-    prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil")?.[field] ??
-    prices?.[0]?.[field] ?? undefined;
-
-  const priceEntry =
-    tcg?.prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil") ??
-    tcg?.prices?.[0];
-
-  return {
-    cardId,
-    name: info.name,
-    set: info.set_name ?? "",
-    number: info.card_number ?? null,
-    rarity: info.rarity ?? null,
-    game: "Pokemon",
-    imageUrl: buildImageUrl(cardId),
-    tcg_url: tcg?.url ?? null,
-    marketValue: pick(tcg?.prices, "market_price"),
-    foilType: priceEntry?.sub_type_name ?? null,
-    confidence: 1.0,
-  };
-}
+// --- PokeWallet result mappers (One Piece only) ---
 
 function mapOnePieceResult(card: any): any {
   const tcg = card.tcgplayer;
@@ -122,7 +44,7 @@ function mapOnePieceResult(card: any): any {
     number: card.card_number ?? null,
     rarity: card.rarity ?? null,
     game: "One Piece",
-    imageUrl: buildImageUrl(cardId),
+    imageUrl: cardId,           // stored as opaque id; proxied via /card-image if needed
     tcg_url: tcg?.url ?? null,
     cardmarket_url: cm?.product_url ?? null,
     marketValue: tcg?.prices?.market_price ?? cm?.prices?.avg ?? undefined,
@@ -131,22 +53,38 @@ function mapOnePieceResult(card: any): any {
 }
 
 // --- TCGdex (Pokemon) mapper ---
+// Full card object from GET /v2/en/cards/{id}
+// pricing.tcgplayer keys: normal, holofoil, reverse-holofoil, 1st-edition, unlimited
+// pricing.cardmarket keys: avg, low, trend, avg-holo …
+// image is a bare CDN URL; append /high/webp for full-size image.
 
 function mapPokemonResultFromTCGdex(card: any): any {
   const cardId: string = card.id;
   const pricing = card.pricing ?? {};
   const tcg = pricing.tcgplayer ?? {};
-  const cm = pricing.cardmarket ?? {};
+  const cm  = pricing.cardmarket ?? {};
 
-  const tcgNormal = tcg.normal ?? tcg.holofoil ?? tcg["reverse-holofoil"] ?? {};
+  // Prefer normal market price, then holofoil, then cardmarket avg
+  const tcgVariant =
+    tcg.normal ??
+    tcg.holofoil ??
+    tcg["reverse-holofoil"] ??
+    tcg.unlimited ??
+    {};
+
+  const foilType: string | null =
+    tcg.holofoil     ? "Holofoil"         :
+    tcg["reverse-holofoil"] ? "Reverse Holofoil" :
+    tcg.normal        ? "Normal"           :
+    null;
+
   const marketValue: number | undefined =
-    typeof tcgNormal.marketPrice === "number"
-      ? tcgNormal.marketPrice
+    typeof tcgVariant.marketPrice === "number"
+      ? tcgVariant.marketPrice
       : typeof cm.avg === "number"
         ? cm.avg
         : undefined;
 
-  // Images come directly from TCGdex CDN: card.image + /high/webp
   const imageBare: string | undefined = card.image;
   const imageUrl = imageBare ? `${imageBare}/high/webp` : undefined;
 
@@ -154,13 +92,13 @@ function mapPokemonResultFromTCGdex(card: any): any {
     cardId,
     name: card.name,
     set: card.set?.name ?? "",
-    number: card.localId ?? null,
+    number: String(card.localId ?? ""),
     rarity: card.rarity ?? null,
     game: "Pokemon",
     imageUrl,
     tcg_url: null,
     marketValue,
-    foilType: null,
+    foilType,
     confidence: 1.0,
   };
 }
@@ -234,13 +172,10 @@ Rules:
 }
 
 // --- Rectangle detection ---
-// Uses strict card aspect-ratio bounds (portrait 1.28–1.60) plus a minimum
-// entropy floor to distinguish a focused card from an empty camera frame.
 function detectRectangleInBuffer(buffer: Buffer): boolean {
   let width = 0;
   let height = 0;
 
-  // Parse JPEG dimensions from SOF marker
   if (buffer[0] === 0xff && buffer[1] === 0xd8) {
     let i = 2;
     while (i < buffer.length - 8) {
@@ -254,25 +189,20 @@ function detectRectangleInBuffer(buffer: Buffer): boolean {
         (marker >= 0xcd && marker <= 0xcf)
       ) {
         height = buffer.readUInt16BE(i + 5);
-        width = buffer.readUInt16BE(i + 7);
+        width  = buffer.readUInt16BE(i + 7);
         break;
       }
       i += 2 + len;
     }
   }
 
-  // Cannot parse dimensions — optimistically allow
   if (width === 0 || height === 0) {
     console.log("[detect-rectangle] could not parse dimensions, allowing");
     return true;
   }
 
-  // Strict portrait ratio for a TCG card: 1.28–1.60 (63×88mm = 1.397)
-  // Phone camera frames are typically 4:3 (1.33) or 16:9 (1.78).
-  // A card filling most of the frame will be portrait within 1.28–1.60.
-  // We also accept landscape-rotated cards: ratio 0.625–0.78 (inverse).
   const ratio = height / width;
-  const portraitCard = ratio >= 1.28 && ratio <= 1.60;
+  const portraitCard  = ratio >= 1.28 && ratio <= 1.60;
   const landscapeCard = ratio >= 0.625 && ratio <= 0.78;
 
   if (!portraitCard && !landscapeCard) {
@@ -280,11 +210,9 @@ function detectRectangleInBuffer(buffer: Buffer): boolean {
     return false;
   }
 
-  // Entropy floor: a focused card image compresses poorly (more detail).
-  // bytes-per-pixel > 0.15 at quality 0.85 is a reasonable lower bound.
   const bpp = buffer.length / (width * height);
   if (bpp < 0.04) {
-    console.log(`[detect-rectangle] bpp ${bpp.toFixed(4)} too low (blank/blurry frame) — skip`);
+    console.log(`[detect-rectangle] bpp ${bpp.toFixed(4)} too low — skip`);
     return false;
   }
 
@@ -292,24 +220,18 @@ function detectRectangleInBuffer(buffer: Buffer): boolean {
   return true;
 }
 
-// --- Helper: parse Pokemon collector number (e.g. 215/197) ---
+// --- Helper: parse Pokemon collector number ---
 
-function parsePokemonCollectorNumber(raw: string | null): { local?: number; total?: number } {
-  if (!raw) return {};
+function parsePokemonCollectorNumber(raw: string | null): { local: string | null } {
+  if (!raw) return { local: null };
   const m = raw.match(/(\d+)\s*\/\s*(\d+)/);
-  if (!m) return {};
-  const local = Number(m[1]);
-  const total = Number(m[2]);
-  if (Number.isNaN(local) || Number.isNaN(total)) return {};
-  return { local, total };
+  if (!m) return { local: null };
+  return { local: m[1] };   // left side only — this is localId in TCGdex
 }
 
 function normalizeSetName(raw: string | null | undefined): string {
   if (!raw) return "";
-  return raw
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+  return raw.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 // --- Scan lookups ---
@@ -329,84 +251,109 @@ async function lookupOnePieceCard(name: string, number: string | null, apiKey: s
   return null;
 }
 
-async function lookupPokemonCardViaTCGdex(name: string, number: string | null, setName: string | null): Promise<any> {
-  await ensureTCGDexCacheLoaded();
-  if (!tcgdexCards || !tcgdexSets) throw new Error("TCGdex cache not loaded");
+/**
+ * TCGdex Pokemon lookup — 2 API calls maximum, no bulk cache.
+ *
+ * Flow:
+ *  1a. If OCR gave us a localId (left side of NNN/TTT):
+ *      GET /en/cards?name=eq:{name}&localId={local}
+ *      → exact name + exact localId filter server-side
+ *
+ *  1b. If no localId (OCR missed the number):
+ *      GET /en/cards?name={name}
+ *      → laxist name search, then narrow by setName client-side
+ *
+ *  2.  GET /en/cards/{id}  — full card with pricing
+ */
+async function lookupPokemonCardViaTCGdex(
+  name: string,
+  number: string | null,
+  setName: string | null
+): Promise<any> {
+  const { local } = parsePokemonCollectorNumber(number);
 
-  const normalizedName = name.toLowerCase();
-  const { local, total } = parsePokemonCollectorNumber(number);
+  let cardId: string | null = null;
 
-  // 1. Name match (exact then substring)
-  let candidates = tcgdexCards.filter(
-    (c) => typeof c.name === "string" && c.name.toLowerCase() === normalizedName
-  );
-  if (candidates.length === 0) {
-    candidates = tcgdexCards.filter(
-      (c) => typeof c.name === "string" && c.name.toLowerCase().includes(normalizedName)
-    );
+  // --- Step 1a: exact name + localId search ---
+  if (local) {
+    const url = `${TCGDEX_BASE}/cards?name=eq:${encodeURIComponent(name)}&localId=${encodeURIComponent(local)}`;
+    console.log("[tcgdex] step1a search:", url);
+    const res = await fetch(url);
+
+    if (res.ok) {
+      const cards = (await res.json()) as Array<{ id: string; localId: string | number; name: string; set?: { id: string; name: string } }>;
+      console.log("[tcgdex] step1a results:", cards.length);
+
+      if (cards.length === 1) {
+        cardId = cards[0].id;
+      } else if (cards.length > 1) {
+        // Multiple cards with same name + localId across different sets.
+        // Narrow by setName if OCR provided it.
+        let best = cards[0];
+        if (setName) {
+          const target = normalizeSetName(setName);
+          const bySet = cards.find((c) => {
+            const norm = normalizeSetName(c.set?.name);
+            return norm === target || norm.includes(target) || target.includes(norm);
+          });
+          if (bySet) best = bySet;
+        }
+        console.log("[tcgdex] step1a picked:", best.id, "set:", best.set?.name);
+        cardId = best.id;
+      }
+    }
   }
 
-  if (candidates.length === 0) {
-    console.log("[tcgdex] no candidates for name:", normalizedName, "number:", number, "setName:", setName);
+  // --- Step 1b: laxist name search fallback ---
+  if (!cardId) {
+    const url = `${TCGDEX_BASE}/cards?name=${encodeURIComponent(name)}`;
+    console.log("[tcgdex] step1b search:", url);
+    const res = await fetch(url);
+
+    if (!res.ok) {
+      console.warn("[tcgdex] step1b failed:", res.status);
+      return null;
+    }
+
+    const cards = (await res.json()) as Array<{ id: string; localId: string | number; name: string; set?: { id: string; name: string } }>;
+    console.log("[tcgdex] step1b results:", cards.length);
+
+    if (cards.length === 0) return null;
+
+    // Narrow by localId if we have it (in case eq: search above returned 0)
+    let candidates = cards;
+    if (local) {
+      const byLocal = candidates.filter((c) => String(c.localId) === local);
+      if (byLocal.length > 0) candidates = byLocal;
+    }
+
+    // Narrow by set name
+    if (setName && candidates.length > 1) {
+      const target = normalizeSetName(setName);
+      const bySet = candidates.filter((c) => {
+        const norm = normalizeSetName(c.set?.name);
+        return norm === target || norm.includes(target) || target.includes(norm);
+      });
+      if (bySet.length > 0) candidates = bySet;
+    }
+
+    cardId = candidates[0].id;
+    console.log("[tcgdex] step1b picked:", cardId);
+  }
+
+  if (!cardId) return null;
+
+  // --- Step 2: fetch full card with pricing ---
+  const fullUrl = `${TCGDEX_BASE}/cards/${encodeURIComponent(cardId)}`;
+  console.log("[tcgdex] step2 fetch:", fullUrl);
+  const fullRes = await fetch(fullUrl);
+  if (!fullRes.ok) {
+    console.warn("[tcgdex] step2 failed:", fullRes.status);
     return null;
   }
 
-  // 2. Narrow by local + total (both sides of collector number)
-  if (local && total) {
-    let matchingSets = tcgdexSets.filter((s) => s.cardCount && s.cardCount.total === total);
-
-    // Additionally filter by set name when OCR provided it
-    if (setName) {
-      const target = normalizeSetName(setName);
-      const bySetName = matchingSets.filter((s) => {
-        const norm = normalizeSetName(s.name);
-        return norm === target || norm.includes(target) || target.includes(norm);
-      });
-      if (bySetName.length > 0) {
-        matchingSets = bySetName;
-      } else {
-        console.log("[tcgdex] setName filter yielded 0 results, ignoring setName:", setName);
-      }
-    }
-
-    const matchingSetIds = new Set(matchingSets.map((s) => s.id));
-
-    const narrowed = candidates.filter((c) => {
-      const setId = c.set?.id;
-      const localId = c.localId;
-      if (!setId || !matchingSetIds.has(setId)) return false;
-      if (localId === undefined || localId === null) return false;
-      return String(localId) === String(local);
-    });
-
-    if (narrowed.length >= 1) {
-      if (narrowed.length > 1) {
-        console.log("[tcgdex] multiple after set+local filter, picking first",
-          { name: normalizedName, number, setName, ids: narrowed.map((c) => c.id) });
-      }
-      candidates = narrowed;
-    } else {
-      console.log("[tcgdex] no match after set+local filter, falling back to name-only",
-        { name: normalizedName, number, setName });
-    }
-  } else if (setName && candidates.length > 1) {
-    // No collector number but have set name — narrow by set
-    const target = normalizeSetName(setName);
-    const bySetName = candidates.filter((c) => {
-      const norm = normalizeSetName(c.set?.name);
-      return norm === target || norm.includes(target) || target.includes(norm);
-    });
-    if (bySetName.length > 0) candidates = bySetName;
-  }
-
-  const cardResume = candidates[0];
-  if (!cardResume) return null;
-
-  console.log("[tcgdex] resolved card:", cardResume.id, "set:", cardResume.set?.name);
-
-  const fullRes = await fetch(`${TCGDEX_BASE}/cards/${encodeURIComponent(cardResume.id)}`);
-  if (!fullRes.ok) throw new Error(`TCGdex card fetch failed (${fullRes.status})`);
   const fullCard = await fullRes.json();
+  console.log("[tcgdex] step2 got card:", fullCard.id, "pricing:", !!fullCard.pricing);
   return mapPokemonResultFromTCGdex(fullCard);
 }
 
@@ -422,32 +369,34 @@ async function lookupCard(name: string, number: string | null, game: string, set
   return lookupPokemonCardViaTCGdex(name, number, setName);
 }
 
-// --- Price refresh ---
+// --- Price refresh (TCGdex for Pokemon, PokeWallet for One Piece) ---
 
 async function lookupPriceById(cardId: string): Promise<{ cardId: string; marketValue?: number } | null> {
-  const apiKey = process.env.POKEWALLET_API_KEY;
-  if (!apiKey) return null;
   try {
-    const isOnePiece = cardId.startsWith("op_");
-    const url = isOnePiece
-      ? `${POKEWALLET_BASE}/op/cards/${encodeURIComponent(cardId)}`
-      : `${POKEWALLET_BASE}/cards/${encodeURIComponent(cardId)}`;
-    const res = await fetch(url, { headers: pokeHeaders(apiKey) });
-    if (!res.ok) return null;
-    const data = (await res.json()) as any;
+    const isOnePiece = cardId.startsWith("op_") || cardId.startsWith("op-");
     if (isOnePiece) {
+      const apiKey = process.env.POKEWALLET_API_KEY;
+      if (!apiKey) return null;
+      const res = await fetch(`${POKEWALLET_BASE}/op/cards/${encodeURIComponent(cardId)}`, { headers: pokeHeaders(apiKey) });
+      if (!res.ok) return null;
+      const data = (await res.json()) as any;
       return { cardId, marketValue: data.tcgplayer?.prices?.market_price ?? data.cardmarket?.prices?.avg };
     }
-    const pick = (prices: any[], field: string) =>
-      prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil")?.[field] ??
-      prices?.[0]?.[field] ?? undefined;
-    return { cardId, marketValue: pick(data.tcgplayer?.prices, "market_price") };
-  } catch { return null; }
+
+    // Pokemon — re-fetch full card from TCGdex for latest pricing
+    const res = await fetch(`${TCGDEX_BASE}/cards/${encodeURIComponent(cardId)}`);
+    if (!res.ok) return null;
+    const card = await res.json();
+    const mapped = mapPokemonResultFromTCGdex(card);
+    return { cardId, marketValue: mapped.marketValue };
+  } catch {
+    return null;
+  }
 }
 
 // --- Routes ---
 
-// GET /card-image/:id — proxies PokeWallet images (One Piece + legacy Pokemon)
+// GET /card-image/:id — proxies PokeWallet images for One Piece cards
 router.get("/card-image/:id", async (req, res) => {
   const apiKey = process.env.POKEWALLET_API_KEY;
   if (!apiKey) { res.status(500).json({ error: "API key not configured" }); return; }
@@ -469,7 +418,6 @@ router.get("/card-image/:id", async (req, res) => {
 });
 
 // POST /detect-rectangle
-// Called by the client every 3 seconds. Returns { hasRectangle: boolean }.
 router.post("/detect-rectangle", upload.single("image"), (req, res) => {
   if (!req.file) { res.status(400).json({ error: "No image provided" }); return; }
   const hasRectangle = detectRectangleInBuffer(req.file.buffer);
@@ -479,8 +427,6 @@ router.post("/detect-rectangle", upload.single("image"), (req, res) => {
 // GET /search
 router.get("/search", async (req, res) => {
   const apiKey = process.env.POKEWALLET_API_KEY;
-  if (!apiKey) { res.status(500).json({ error: "POKEWALLET_API_KEY not set" }); return; }
-
   const q = (req.query.q as string ?? "").trim();
   const game = (req.query.game as string ?? "pokemon").toLowerCase();
   const limit = Math.min(Number(req.query.limit ?? 20), 50);
@@ -493,6 +439,7 @@ router.get("/search", async (req, res) => {
 
   try {
     if (game === "one piece") {
+      if (!apiKey) { res.status(500).json({ error: "POKEWALLET_API_KEY not set" }); return; }
       const upstream = await fetch(
         `${POKEWALLET_BASE}/op/search?q=${encodeURIComponent(q)}&limit=${limit}`,
         { headers: pokeHeaders(apiKey) }
@@ -503,13 +450,20 @@ router.get("/search", async (req, res) => {
       setCache(cacheKey, results);
       res.json(results);
     } else {
+      // Pokemon — search TCGdex directly
       const upstream = await fetch(
-        `${POKEWALLET_BASE}/search?q=${encodeURIComponent(q)}&limit=${limit}`,
-        { headers: { ...pokeHeaders(apiKey), "Content-Type": "application/json" } }
+        `${TCGDEX_BASE}/cards?name=${encodeURIComponent(q)}&pagination:itemsPerPage=${limit}`
       );
       if (!upstream.ok) { res.status(upstream.status).json({ error: "Search failed" }); return; }
-      const data = (await upstream.json()) as any;
-      const results = (data.results ?? []).map(mapPokemonResultFromPokeWallet);
+      const cards = (await upstream.json()) as Array<{ id: string; localId: string | number; name: string; image?: string; set?: { id: string; name: string } }>;
+      const results = cards.map((c) => ({
+        cardId: c.id,
+        name: c.name,
+        set: c.set?.name ?? "",
+        number: String(c.localId ?? ""),
+        game: "Pokemon",
+        imageUrl: c.image ? `${c.image}/high/webp` : undefined,
+      }));
       setCache(cacheKey, results);
       res.json(results);
     }
