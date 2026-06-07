@@ -155,6 +155,15 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
     Keyboard.dismiss();
   };
 
+  const handleHeaderClose = () => {
+    if (showCreateList) {
+      // When in New List mode, X just closes the list view and returns to details
+      handleCancelCreateList();
+    } else {
+      onClose();
+    }
+  };
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView
@@ -170,7 +179,7 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
             { transform: [{ translateY }] },
           ]}
         >
-          {/* Header row: drag handle + close button */}
+          {/* Header: centered drag handle pill plus an X aligned to top-right */}
           <View style={styles.headerRow}>
             <View {...panResponder.panHandlers} style={styles.dragHandleTouch}>
               <View style={styles.dragHandle}>
@@ -178,7 +187,7 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
               </View>
             </View>
             <Pressable
-              onPress={onClose}
+              onPress={handleHeaderClose}
               style={styles.closeButton}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
@@ -520,22 +529,27 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
 const styles = StyleSheet.create({
   overlayWrap: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.6)",
+    backgroundColor: "transparent", // let camera/content show; no extra global tint
     justifyContent: "flex-end",
   },
   dismissArea: { flex: 1 },
   headerRow: {
-    flexDirection: "row",
+    position: "relative",
     alignItems: "center",
-    justifyContent: "space-between",
-  },
-  dragHandleTouch: {
-    flex: 1,
-    paddingTop: 8,
+    justifyContent: "center",
+    paddingTop: 4,
     paddingBottom: 4,
   },
-  dragHandle: { alignItems: "center", paddingBottom: 8 },
+  dragHandleTouch: {
+    paddingTop: 8,
+    paddingBottom: 4,
+    alignSelf: "stretch",
+  },
+  dragHandle: { alignItems: "center", paddingBottom: 4 },
   closeButton: {
+    position: "absolute",
+    right: 4,
+    top: 0,
     paddingHorizontal: 8,
     paddingVertical: 8,
   },
