@@ -6,7 +6,13 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const POKEWALLET_BASE = "https://api.pokewallet.io";
 
-// ─── OCR ────────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function pokeHeaders(apiKey: string) {
+  return { "X-API-Key": apiKey, Authorization: `Bearer ${apiKey}` };
+}
+
+// ─── OCR ─────────────────────────────────────────────────────────────────────
 
 async function ocrCard(
   imageBase64: string,
@@ -80,7 +86,6 @@ Strict rules:
   if (!jsonMatch) throw new Error(`Could not parse OCR response: ${raw}`);
 
   const parsed = JSON.parse(jsonMatch[0]);
-  // Normalise game field — default to Pokemon for backward compat
   return {
     name: parsed.name ?? null,
     number: parsed.number ?? null,
@@ -89,23 +94,25 @@ Strict rules:
   };
 }
 
-// ─── One Piece lookup ────────────────────────────────────────────────────────
+// ─── Image URL builder ────────────────────────────────────────────────────────
+// Images require auth headers so we proxy them through our own backend.
+// The frontend uses  <BACKEND_URL>/card-image/<cardId>  as the imageUrl.
+
+function buildImageUrl(cardId: string): string {
+  const base = process.env.BACKEND_PUBLIC_URL ?? process.env.EXPO_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+  return `${base}/card-image/${encodeURIComponent(cardId)}`;
+}
+
+// ─── One Piece lookup ─────────────────────────────────────────────────────────
 
 async function lookupOnePieceCard(name: string, number: string | null, apiKey: string): Promise<any> {
-  // Try by card number first (most precise), then by name
   const queries = number ? [number, name] : [name];
 
   for (const q of queries) {
     const res = await fetch(
       `${POKEWALLET_BASE}/op/search?q=${encodeURIComponent(q)}&limit=5`,
-      {
-        headers: {
-          "X-API-Key": apiKey,
-          Authorization: `Bearer ${apiKey}`,
-        },
-      }
+      { headers: pokeHeaders(apiKey) }
     );
-
     if (!res.ok) continue;
 
     const data = (await res.json()) as any;
@@ -114,24 +121,21 @@ async function lookupOnePieceCard(name: string, number: string | null, apiKey: s
     const best = data.data[0];
     const tcg = best.tcgplayer;
     const cm = best.cardmarket;
-
-    const marketValue: number | undefined = tcg?.prices?.market_price ?? cm?.prices?.avg ?? undefined;
-    const lowValue: number | undefined = tcg?.prices?.low_price ?? cm?.prices?.low ?? undefined;
-    const highValue: number | undefined = tcg?.prices?.high_price ?? undefined;
+    const cardId: string = best.id ?? `op-${best.card_number}`;
 
     return {
-      cardId: best.id ?? `op-${best.card_number}`,
+      cardId,
       name: best.name,
-      set: best.card_number?.split("-")[0] ?? "",  // e.g. "OP01" from "OP01-001"
+      set: best.card_number?.split("-")[0] ?? "",
       number: best.card_number ?? null,
       rarity: best.rarity ?? null,
       game: "One Piece",
-      imageUrl: null,  // OP images not exposed via /images yet
+      imageUrl: buildImageUrl(cardId),
       tcg_url: tcg?.url ?? null,
       cardmarket_url: cm?.product_url ?? null,
-      marketValue,
-      lowValue,
-      highValue,
+      marketValue: tcg?.prices?.market_price ?? cm?.prices?.avg ?? undefined,
+      lowValue: tcg?.prices?.low_price ?? cm?.prices?.low ?? undefined,
+      highValue: tcg?.prices?.high_price ?? undefined,
       confidence: 1.0,
     };
   }
@@ -139,7 +143,7 @@ async function lookupOnePieceCard(name: string, number: string | null, apiKey: s
   return null;
 }
 
-// ─── Pokémon lookup ──────────────────────────────────────────────────────────
+// ─── Pokémon lookup ───────────────────────────────────────────────────────────
 
 async function lookupPokemonCard(name: string, number: string | null, apiKey: string): Promise<any> {
   const query = number ? `${name} ${number}` : name;
@@ -148,8 +152,7 @@ async function lookupPokemonCard(name: string, number: string | null, apiKey: st
     `${POKEWALLET_BASE}/search?q=${encodeURIComponent(query)}&limit=5`,
     {
       headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "X-API-Key": apiKey,
+        ...pokeHeaders(apiKey),
         "Content-Type": "application/json",
       },
     }
@@ -166,6 +169,7 @@ async function lookupPokemonCard(name: string, number: string | null, apiKey: st
   const best = data.results[0];
   const info = best.card_info;
   const tcg = best.tcgplayer;
+  const cardId: string = best.id;
 
   const pick = (prices: any[], field: string) =>
     prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil")?.[field] ??
@@ -173,13 +177,14 @@ async function lookupPokemonCard(name: string, number: string | null, apiKey: st
     undefined;
 
   return {
-    cardId: best.id ?? `${info.name}-${info.card_number}`,
+    cardId,
     name: info.name,
     set: info.set_name ?? "",
     number: info.card_number ?? null,
     rarity: info.rarity ?? null,
     game: "Pokemon",
-    imageUrl: info.image_url ?? null,
+    // Image is fetched from /images/:id (requires auth) — proxy through our backend
+    imageUrl: buildImageUrl(cardId),
     tcg_url: tcg?.url ?? null,
     marketValue: pick(tcg?.prices, "market_price"),
     lowValue: pick(tcg?.prices, "low_price"),
@@ -188,20 +193,19 @@ async function lookupPokemonCard(name: string, number: string | null, apiKey: st
   };
 }
 
-// ─── Generic dispatcher ──────────────────────────────────────────────────────
+// ─── Dispatcher ───────────────────────────────────────────────────────────────
 
 async function lookupCard(name: string, number: string | null, game: string): Promise<any> {
   const apiKey = process.env.POKEWALLET_API_KEY;
   if (!apiKey) throw new Error("POKEWALLET_API_KEY is not set");
 
-  const normalised = game.toLowerCase();
-  if (normalised === "one piece") {
+  if (game.toLowerCase() === "one piece") {
     return lookupOnePieceCard(name, number, apiKey);
   }
   return lookupPokemonCard(name, number, apiKey);
 }
 
-// ─── Price refresh ───────────────────────────────────────────────────────────
+// ─── Price refresh ────────────────────────────────────────────────────────────
 
 async function lookupPriceById(
   cardId: string
@@ -210,18 +214,12 @@ async function lookupPriceById(
   if (!apiKey) return null;
 
   try {
-    // One Piece cards use op_ prefix
     const isOnePiece = cardId.startsWith("op_");
     const url = isOnePiece
       ? `${POKEWALLET_BASE}/op/cards/${encodeURIComponent(cardId)}`
       : `${POKEWALLET_BASE}/cards/${encodeURIComponent(cardId)}`;
 
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "X-API-Key": apiKey,
-      },
-    });
+    const res = await fetch(url, { headers: pokeHeaders(apiKey) });
     if (!res.ok) return null;
 
     const data = (await res.json()) as any;
@@ -254,8 +252,40 @@ async function lookupPriceById(
   }
 }
 
-// ─── Routes ──────────────────────────────────────────────────────────────────
+// ─── Routes ───────────────────────────────────────────────────────────────────
 
+// GET /card-image/:id  — proxy PokéWallet /images/:id (requires auth header)
+router.get("/card-image/:id", async (req, res) => {
+  const apiKey = process.env.POKEWALLET_API_KEY;
+  if (!apiKey) { res.status(500).json({ error: "API key not configured" }); return; }
+
+  const { id } = req.params;
+  const size = (req.query.size as string) ?? "high";
+
+  try {
+    const upstream = await fetch(
+      `${POKEWALLET_BASE}/images/${encodeURIComponent(id)}?size=${size}`,
+      { headers: pokeHeaders(apiKey) }
+    );
+
+    if (!upstream.ok) {
+      res.status(upstream.status).json({ error: "Image not available" });
+      return;
+    }
+
+    const contentType = upstream.headers.get("content-type") ?? "image/jpeg";
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+
+    res.set("Content-Type", contentType);
+    res.set("Cache-Control", "public, max-age=86400"); // cache 24h on client
+    res.send(buffer);
+  } catch (err) {
+    console.error("card-image proxy error:", err);
+    res.status(500).json({ error: "Failed to fetch image" });
+  }
+});
+
+// POST /identify-card
 router.post("/identify-card", upload.single("image"), async (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: "No image provided" });
@@ -284,6 +314,7 @@ router.post("/identify-card", upload.single("image"), async (req, res) => {
         set: "",
         game: ocr.game,
         confidence: ocr.confidence * 0.7,
+        imageUrl: undefined,
         marketValue: undefined,
         lowValue: undefined,
         highValue: undefined,
@@ -302,8 +333,6 @@ router.post("/identify-card", upload.single("image"), async (req, res) => {
 });
 
 // POST /refresh-prices
-// Body: { cardIds: string[] }
-// Returns: array of { cardId, marketValue?, lowValue?, highValue? }
 router.post("/refresh-prices", async (req, res) => {
   const { cardIds } = req.body as { cardIds?: string[] };
   if (!Array.isArray(cardIds) || cardIds.length === 0) {
