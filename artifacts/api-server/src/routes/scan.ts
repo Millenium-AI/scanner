@@ -6,7 +6,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const POKEWALLET_BASE = "https://api.pokewallet.io";
 
-async function ocrCard(imageBase64: string, mimeType: string): Promise<{ name: string; number: string | null; confidence: number }> {
+async function ocrCard(imageBase64: string, mimeType: string): Promise<{ name: string | null; number: string | null; confidence: number }> {
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -14,23 +14,28 @@ async function ocrCard(imageBase64: string, mimeType: string): Promise<{ name: s
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "meta-llama/llama-3.2-11b-vision-instruct",
+      model: "google/gemini-flash-1.5",
       messages: [{
         role: "user",
         content: [
           {
             type: "text",
-            text: `You are reading text off a Pokémon or One Piece trading card.
-Look carefully at the card and extract ONLY what you can clearly read.
-Respond with ONLY this JSON — no other text:
-{"name":"exact card name as printed","number":"set number like 4/102 or 025/198","confidence":0.95}
+            text: `You are a Pokémon TCG card reader. Your ONLY job is to read text printed on the card.
 
-Rules:
-- "name" must be the exact name printed on the card (e.g. "Charizard ex", "Charizard VMAX")
-- "number" must be the collector number (bottom of card, e.g. "4/102", "148/165")
-- "confidence" is how sure you are that you read both values correctly (0.0 to 1.0)
-- If you cannot clearly read a value, use null for that field and lower the confidence
-- Do NOT guess or infer — only report what you can see`
+Look at the card image and find:
+1. The card NAME (top of card, e.g. "Charizard ex", "Flygon ex", "Pikachu")
+2. The COLLECTOR NUMBER (bottom of card, e.g. "222/198", "4/102", "148/165")
+
+Respond with ONLY valid JSON, nothing else:
+{"name":"Charizard ex","number":"222/198","confidence":0.95}
+
+Strict rules:
+- Only output the JSON object, no explanation, no markdown
+- "name" = exact name text at the top of the card
+- "number" = the X/Y number at the bottom (e.g. "222/198")
+- If you genuinely cannot read a field, use null
+- "confidence" = 0.0 to 1.0 based on how clearly you can read the text
+- NEVER invent or guess values you cannot see`
           },
           {
             type: "image_url",
@@ -45,7 +50,9 @@ Rules:
   if (!data.choices?.[0]) throw new Error("Vision API returned no choices");
 
   const raw = data.choices[0].message.content.trim();
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  // Strip markdown code fences if model wraps in ```json
+  const cleaned = raw.replace(/^```[\w]*\n?/, "").replace(/\n?```$/, "").trim();
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error(`Could not parse OCR response: ${raw}`);
 
   return JSON.parse(jsonMatch[0]);
@@ -59,7 +66,13 @@ async function lookupCard(name: string, number: string | null): Promise<any> {
 
   const res = await fetch(
     `${POKEWALLET_BASE}/search?q=${encodeURIComponent(query)}&limit=5`,
-    { headers: { "X-API-Key": apiKey } }
+    {
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "X-API-Key": apiKey,
+        "Content-Type": "application/json",
+      }
+    }
   );
 
   if (!res.ok) {
@@ -74,7 +87,6 @@ async function lookupCard(name: string, number: string | null): Promise<any> {
   const info = best.card_info;
   const tcg = best.tcgplayer;
 
-  // Pick best USD price from TCGPlayer
   const marketValue: number | undefined =
     tcg?.prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil")?.market_price
     ?? tcg?.prices?.[0]?.market_price
@@ -90,7 +102,6 @@ async function lookupCard(name: string, number: string | null): Promise<any> {
     ?? tcg?.prices?.[0]?.high_price
     ?? undefined;
 
-  // Return shape matching CardScanResult
   return {
     cardId: best.id ?? `${info.name}-${info.card_number}`,
     name: info.name,
@@ -98,8 +109,6 @@ async function lookupCard(name: string, number: string | null): Promise<any> {
     number: info.card_number ?? null,
     rarity: info.rarity ?? null,
     game: "Pokemon",
-    hp: info.hp ?? null,
-    stage: info.stage ?? null,
     imageUrl: info.image_url ?? null,
     tcg_url: tcg?.url ?? null,
     marketValue,
@@ -119,7 +128,6 @@ router.post("/identify-card", upload.single("image"), async (req, res) => {
     const imageBase64 = req.file.buffer.toString("base64");
     const mimeType = req.file.mimetype;
 
-    // Step 1: OCR
     const ocr = await ocrCard(imageBase64, mimeType);
     console.log("OCR result:", ocr);
 
@@ -128,11 +136,9 @@ router.post("/identify-card", upload.single("image"), async (req, res) => {
       return;
     }
 
-    // Step 2: PokéWallet lookup
     const card = await lookupCard(ocr.name, ocr.number);
 
     if (!card) {
-      // Graceful fallback — return OCR data without price
       res.json({
         cardId: `ocr-${Date.now()}`,
         name: ocr.name,
