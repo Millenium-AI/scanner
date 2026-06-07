@@ -18,6 +18,12 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { CardResultSheet } from "@/components/CardResultSheet";
 import { VariantPickerModal } from "@/components/VariantPickerModal";
+import {
+  ScanFilterSheet,
+  ScanFilters,
+  EMPTY_FILTERS,
+  activeFilterCount,
+} from "@/components/ScanFilterSheet";
 import { CardScanResult, useScanContext } from "@/context/ScanContext";
 import { useColors } from "@/hooks/useColors";
 import { identifyCard } from "@/services/cardScanService";
@@ -57,17 +63,10 @@ async function cropToFrame(
   try {
     const scaleX = photoWidth / SCREEN_W;
     const scaleY = photoHeight / SCREEN_H;
-
     const cropX = Math.max(0, Math.round(frame.x * scaleX));
     const cropY = Math.max(0, Math.round(frame.y * scaleY));
     const cropW = Math.min(Math.round(frame.width * scaleX), photoWidth - cropX);
     const cropH = Math.min(Math.round(frame.height * scaleY), photoHeight - cropY);
-
-    console.log(
-      `[cropToFrame] photo=${photoWidth}x${photoHeight} frame=${frame.width}x${frame.height}` +
-      ` crop=(${cropX},${cropY},${cropW},${cropH})`
-    );
-
     const result = await ImageManipulator.manipulateAsync(
       photoUri,
       [{ crop: { originX: cropX, originY: cropY, width: cropW, height: cropH } }],
@@ -78,6 +77,46 @@ async function cropToFrame(
     console.warn("[cropToFrame] failed, using original:", err);
     return photoUri;
   }
+}
+
+// ─── Filter badge icon ────────────────────────────────────────────────────────
+function FilterIconButton({
+  count,
+  onPress,
+  dark,
+  colors,
+}: {
+  count: number;
+  onPress: () => void;
+  dark?: boolean;
+  colors: any;
+}) {
+  return (
+    <Pressable
+      onPress={() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onPress();
+      }}
+      style={[
+        fStyles.btn,
+        dark
+          ? { backgroundColor: "rgba(255,255,255,0.15)" }
+          : { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1.5 },
+      ]}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+    >
+      <Ionicons
+        name="options-outline"
+        size={19}
+        color={dark ? "rgba(255,255,255,0.85)" : colors.foreground}
+      />
+      {count > 0 && (
+        <View style={[fStyles.badge, { backgroundColor: colors.accent }]}>
+          <Text style={[fStyles.badgeText, { color: colors.background }]}>{count}</Text>
+        </View>
+      )}
+    </Pressable>
+  );
 }
 
 // ─── List Dropdown ────────────────────────────────────────────────────────────
@@ -122,26 +161,27 @@ function WebScannerScreen() {
   const [resultCard, setResultCard] = useState<CardScanResult | null>(null);
   const [showResult, setShowResult] = useState(false);
   const [showListDrop, setShowListDrop] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState<ScanFilters>(EMPTY_FILTERS);
   const [variantCards, setVariantCards] = useState<CardScanResult[]>([]);
   const [showVariantPicker, setShowVariantPicker] = useState(false);
   const { lists, activeScanListId } = useScanContext();
   const activeList = lists.find((l) => l.id === activeScanListId);
   const topPad = 67;
   const bottomPad = 34 + 84;
+  const filterCount = activeFilterCount(filters);
 
   const runIdentify = async (uri: string) => {
     setScanState("scanning");
     setErrorMsg("");
     try {
-      const result = await identifyCard(uri);
-
+      const result = await identifyCard(uri, filters);
       if (result.type === "variants") {
         setVariantCards(result.cards);
         setShowVariantPicker(true);
         setScanState("idle");
         return;
       }
-
       setResultCard(result.card);
       setShowResult(true);
       setScanState("success");
@@ -188,16 +228,19 @@ function WebScannerScreen() {
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
       <View style={styles.header}>
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>Scanner</Text>
-        <Pressable
-          style={[styles.listBadge, { backgroundColor: colors.surface, borderColor: activeList?.color ?? colors.accent }]}
-          onPress={() => setShowListDrop(true)}
-        >
-          <View style={[styles.listDot, { backgroundColor: activeList?.color ?? colors.accent }]} />
-          <Text style={[styles.listBadgeText, { color: colors.foreground }]}>
-            {activeList?.name ?? "My Lists"}
-          </Text>
-          <Ionicons name="chevron-down" size={12} color={colors.mutedForeground} />
-        </Pressable>
+        <View style={styles.headerRight}>
+          <FilterIconButton count={filterCount} onPress={() => setShowFilters(true)} colors={colors} />
+          <Pressable
+            style={[styles.listBadge, { backgroundColor: colors.surface, borderColor: activeList?.color ?? colors.accent }]}
+            onPress={() => setShowListDrop(true)}
+          >
+            <View style={[styles.listDot, { backgroundColor: activeList?.color ?? colors.accent }]} />
+            <Text style={[styles.listBadgeText, { color: colors.foreground }]}>
+              {activeList?.name ?? "My Lists"}
+            </Text>
+            <Ionicons name="chevron-down" size={12} color={colors.mutedForeground} />
+          </Pressable>
+        </View>
       </View>
       <View style={styles.scanArea}>
         <View style={[styles.cardFrame, { borderColor: colors.border, backgroundColor: colors.card }]}>
@@ -222,6 +265,10 @@ function WebScannerScreen() {
           )}
         </View>
       </View>
+      {/* Active filter pills */}
+      {filterCount > 0 && (
+        <ActiveFilterPills filters={filters} colors={colors} onClear={(key) => setFilters(f => ({ ...f, [key]: null }))} />
+      )}
       <View style={[styles.actions, { paddingBottom: bottomPad }]}>
         <Pressable
           style={({ pressed }) => [styles.captureBtn, { backgroundColor: colors.accent, opacity: pressed || scanState === "scanning" ? 0.8 : 1 }]}
@@ -241,6 +288,12 @@ function WebScannerScreen() {
         </Pressable>
       </View>
       {showListDrop && <ListDropdown colors={colors} onClose={() => setShowListDrop(false)} />}
+      <ScanFilterSheet
+        visible={showFilters}
+        filters={filters}
+        onChange={setFilters}
+        onClose={() => setShowFilters(false)}
+      />
       <VariantPickerModal
         visible={showVariantPicker}
         variants={variantCards}
@@ -263,12 +316,18 @@ function NativeScannerScreen() {
   const [showResult, setShowResult] = useState(false);
   const [flash, setFlash] = useState<"on" | "off">("off");
   const [showListDrop, setShowListDrop] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState<ScanFilters>(EMPTY_FILTERS);
   const [variantCards, setVariantCards] = useState<CardScanResult[]>([]);
   const [showVariantPicker, setShowVariantPicker] = useState(false);
   const { lists, activeScanListId } = useScanContext();
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const [permission, requestPermission] = useCameraPermissions!();
   const activeList = lists.find((l) => l.id === activeScanListId);
+  const filterCount = activeFilterCount(filters);
+
+  const filtersRef = useRef<ScanFilters>(EMPTY_FILTERS);
+  useEffect(() => { filtersRef.current = filters; }, [filters]);
 
   const scanStateRef = useRef<ScanState>("idle");
   const showResultRef = useRef(false);
@@ -304,7 +363,6 @@ function NativeScannerScreen() {
         const layout = { x: pageX, y: pageY, width, height };
         setFrameLayout(layout);
         frameLayoutRef.current = layout;
-        console.log("[frameLayout] measured:", layout);
       });
     } else {
       const { x, y, width, height } = e.nativeEvent.layout;
@@ -319,10 +377,9 @@ function NativeScannerScreen() {
     setErrorMsg("");
     startPulse();
     try {
-      const result = await identifyCard(uri);
+      const result = await identifyCard(uri, filtersRef.current);
 
       if (result.type === "variants") {
-        // Multiple variants — pause auto-scan and show picker
         setVariantCards(result.cards);
         setShowVariantPicker(true);
         setScanState("idle");
@@ -333,7 +390,6 @@ function NativeScannerScreen() {
 
       const card = result.card;
       if (auto && typeof card.confidence === "number" && card.confidence < CONFIDENCE_THRESHOLD) {
-        console.log("[runIdentify] auto-scan below confidence threshold, backing off");
         backoffUntilRef.current = Date.now() + AUTO_SCAN_BACKOFF_MS;
         setScanState("idle");
         return;
@@ -374,7 +430,6 @@ function NativeScannerScreen() {
     backoffUntilRef.current = 0;
   };
 
-  // Auto-scan loop: skips when variant picker is open
   useEffect(() => {
     const interval = setInterval(async () => {
       if (showResultRef.current) return;
@@ -383,10 +438,7 @@ function NativeScannerScreen() {
       if (inflightRef.current) return;
       if (Date.now() < backoffUntilRef.current) return;
       if (!cameraRef.current) return;
-      if (!frameLayoutRef.current) {
-        console.log("[auto-scan] frame layout not measured yet, skipping");
-        return;
-      }
+      if (!frameLayoutRef.current) return;
 
       inflightRef.current = true;
 
@@ -401,18 +453,11 @@ function NativeScannerScreen() {
         });
 
         if (!photo?.uri || !photo?.width || !photo?.height) {
-          console.warn("[auto-scan] incomplete photo data");
           inflightRef.current = false;
           return;
         }
 
-        const cropped = await cropToFrame(
-          photo.uri,
-          photo.width,
-          photo.height,
-          frameLayoutRef.current
-        );
-
+        const cropped = await cropToFrame(photo.uri, photo.width, photo.height, frameLayoutRef.current);
         await runIdentify(cropped, true);
       } catch (err) {
         console.warn("[auto-scan] unexpected error:", err);
@@ -502,12 +547,27 @@ function NativeScannerScreen() {
 
       <View style={[styles.nativeHeader, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.nativeHeaderTitle}>Scan Card</Text>
-        <Pressable style={styles.listBadgeDark} onPress={() => setShowListDrop(true)}>
-          <View style={[styles.listDot, { backgroundColor: activeList?.color ?? colors.accent }]} />
-          <Text style={styles.listBadgeDarkText}>{activeList?.name ?? "My Lists"}</Text>
-          <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.6)" />
-        </Pressable>
+        <View style={styles.headerRight}>
+          <FilterIconButton count={filterCount} onPress={() => setShowFilters(true)} colors={colors} dark />
+          <Pressable style={styles.listBadgeDark} onPress={() => setShowListDrop(true)}>
+            <View style={[styles.listDot, { backgroundColor: activeList?.color ?? colors.accent }]} />
+            <Text style={styles.listBadgeDarkText}>{activeList?.name ?? "My Lists"}</Text>
+            <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.6)" />
+          </Pressable>
+        </View>
       </View>
+
+      {/* Active filter pills — shown on camera view */}
+      {filterCount > 0 && (
+        <View style={[styles.nativeFilterPills, { top: insets.top + 64 }]}>
+          <ActiveFilterPills
+            filters={filters}
+            colors={colors}
+            dark
+            onClear={(key) => setFilters(f => ({ ...f, [key]: null }))}
+          />
+        </View>
+      )}
 
       <View style={styles.frameOverlay} pointerEvents="none">
         <Animated.View
@@ -554,6 +614,12 @@ function NativeScannerScreen() {
       </View>
 
       {showListDrop && <ListDropdown colors={colors} onClose={() => setShowListDrop(false)} />}
+      <ScanFilterSheet
+        visible={showFilters}
+        filters={filters}
+        onChange={setFilters}
+        onClose={() => setShowFilters(false)}
+      />
       <VariantPickerModal
         visible={showVariantPicker}
         variants={variantCards}
@@ -561,6 +627,50 @@ function NativeScannerScreen() {
         onCancel={handleVariantCancel}
       />
       <CardResultSheet visible={showResult} result={resultCard} onClose={handleScanAgain} onScanAgain={handleScanAgain} />
+    </View>
+  );
+}
+
+// ─── Active filter pills (shared web+native) ──────────────────────────────────
+function ActiveFilterPills({
+  filters,
+  colors,
+  dark,
+  onClear,
+}: {
+  filters: ScanFilters;
+  colors: any;
+  dark?: boolean;
+  onClear: (key: keyof ScanFilters) => void;
+}) {
+  const pills: { key: keyof ScanFilters; label: string }[] = [];
+  if (filters.game)     pills.push({ key: "game",     label: filters.game });
+  if (filters.set)      pills.push({ key: "set",      label: filters.set });
+  if (filters.language) pills.push({ key: "language", label: filters.language });
+  if (filters.finish)   pills.push({ key: "finish",   label: filters.finish });
+
+  return (
+    <View style={pillStyles.row}>
+      {pills.map(({ key, label }) => (
+        <Pressable
+          key={key}
+          style={[
+            pillStyles.pill,
+            dark
+              ? { backgroundColor: "rgba(255,255,255,0.18)" }
+              : { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 },
+          ]}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onClear(key);
+          }}
+        >
+          <Text style={[pillStyles.pillText, { color: dark ? "#fff" : colors.foreground }]}>
+            {label}
+          </Text>
+          <Ionicons name="close" size={11} color={dark ? "rgba(255,255,255,0.7)" : colors.mutedForeground} />
+        </Pressable>
+      ))}
     </View>
   );
 }
@@ -578,6 +688,7 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16, paddingHorizontal: 32 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 20 },
   headerTitle: { fontSize: 26, fontFamily: "Poppins_700Bold" },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 10 },
   listBadge: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5 },
   listBadgeText: { fontSize: 12, fontFamily: "Poppins_600SemiBold" },
   listDot: { width: 8, height: 8, borderRadius: 4 },
@@ -615,6 +726,7 @@ const styles = StyleSheet.create({
   permBtnText: { fontSize: 16, fontFamily: "Poppins_600SemiBold" },
   uploadLink: { marginTop: 12, padding: 8 },
   uploadLinkText: { fontSize: 14, fontFamily: "Poppins_400Regular", textDecorationLine: "underline" },
+  nativeFilterPills: { position: "absolute", left: 0, right: 0, zIndex: 9, paddingHorizontal: 20 },
 });
 
 const ddStyles = StyleSheet.create({
@@ -624,4 +736,16 @@ const ddStyles = StyleSheet.create({
   item: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 18, paddingVertical: 14 },
   dot: { width: 10, height: 10, borderRadius: 5 },
   itemText: { flex: 1, fontSize: 15, fontFamily: "Poppins_500Medium" },
+});
+
+const fStyles = StyleSheet.create({
+  btn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  badge: { position: "absolute", top: -2, right: -2, minWidth: 16, height: 16, borderRadius: 8, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 },
+  badgeText: { fontSize: 10, fontFamily: "Poppins_700Bold", lineHeight: 14 },
+});
+
+const pillStyles = StyleSheet.create({
+  row: { flexDirection: "row", flexWrap: "wrap", gap: 6, paddingHorizontal: 20, paddingBottom: 12 },
+  pill: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14 },
+  pillText: { fontSize: 12, fontFamily: "Poppins_500Medium" },
 });
