@@ -2,13 +2,15 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as WebBrowser from "expo-web-browser";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
   Keyboard,
+  KeyboardAvoidingView,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -59,6 +61,16 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
   const [newListColor, setNewListColor] = useState(LIST_COLORS[0]);
 
   const translateY = useRef(new Animated.Value(0)).current;
+
+  // Reset local state whenever the sheet is closed or result changes
+  useEffect(() => {
+    if (!visible || !result) {
+      setShowCreateList(false);
+      setNewListName("");
+      setNewListColor(LIST_COLORS[0]);
+      translateY.setValue(0);
+    }
+  }, [visible, result, translateY]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -131,9 +143,21 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
     onClose();
   };
 
+  const handleCancelCreateList = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setShowCreateList(false);
+    setNewListName("");
+    setNewListColor(LIST_COLORS[0]);
+    Keyboard.dismiss();
+  };
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.overlayWrap}>
+      <KeyboardAvoidingView
+        style={styles.overlayWrap}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={insets.top + 32}
+      >
         <Pressable style={styles.dismissArea} onPress={onClose} />
         <Animated.View
           {...panResponder.panHandlers}
@@ -233,12 +257,7 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
 
               <Pressable
                 style={[styles.btn, styles.btnGhost, { borderColor: colors.border, marginTop: 12 }]}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setShowCreateList(false);
-                  setNewListName("");
-                  setNewListColor(LIST_COLORS[0]);
-                }}
+                onPress={handleCancelCreateList}
               >
                 <Ionicons
                   name="close-circle-outline"
@@ -479,7 +498,7 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
             </ScrollView>
           )}
         </Animated.View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
