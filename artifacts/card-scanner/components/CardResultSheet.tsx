@@ -74,6 +74,7 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
 
   const panResponder = useRef(
     PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_, g) => {
         const isVertical = Math.abs(g.dy) > Math.abs(g.dx);
         return isVertical && Math.abs(g.dy) > 6;
@@ -163,16 +164,17 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
       >
         <Pressable style={styles.dismissArea} onPress={onClose} />
         <Animated.View
-          {...panResponder.panHandlers}
           style={[
             styles.sheet,
             { backgroundColor: colors.card, paddingBottom: insets.bottom + 20 },
             { transform: [{ translateY }] },
           ]}
         >
-          {/* Drag handle */}
-          <View style={styles.dragHandle}>
-            <View style={[styles.handle, { backgroundColor: colors.border }]} />
+          {/* Drag handle (gesture attached here so it never conflicts with ScrollView) */}
+          <View {...panResponder.panHandlers} style={styles.dragHandleTouch}>
+            <View style={styles.dragHandle}>
+              <View style={[styles.handle, { backgroundColor: colors.border }]} />
+            </View>
           </View>
 
           {showCreateList ? (
@@ -513,7 +515,11 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   dismissArea: { flex: 1 },
-  dragHandle: { alignItems: "center", paddingTop: 12, paddingBottom: 8 },
+  dragHandleTouch: {
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  dragHandle: { alignItems: "center", paddingBottom: 8 },
   sheet: {
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
