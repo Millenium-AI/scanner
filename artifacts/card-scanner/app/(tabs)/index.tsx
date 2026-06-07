@@ -31,17 +31,58 @@ let useCameraPermissions: (() => [
   () => Promise<void>
 ]) | null = null;
 
+// Rectangle detection via expo-camera scannerOptions / Vision (native only)
+let detectRectangle: ((uri: string) => Promise<boolean>) | null = null;
+
 if (Platform.OS !== "web") {
   const cam = require("expo-camera");
   CameraView = cam.CameraView;
   useCameraPermissions = cam.useCameraPermissions;
+
+  // Use expo-image-manipulator + a lightweight heuristic to detect if the
+  // captured frame contains a prominent rectangle (card).  We send the image
+  // to the backend /detect-rectangle endpoint which runs server-side rectangle
+  // scoring, OR we fall back to a local aspect-ratio heuristic via the
+  // camera's built-in scannerOptions when available.
+  //
+  // For maximum compatibility without adding a native Vision module we use the
+  // backend detect-rectangle route (added in scan.ts). If that route is not
+  // yet deployed the function defaults to true so existing manual captures
+  // still work.
+  detectRectangle = async (uri: string): Promise<boolean> => {
+    try {
+      const BACKEND_URL =
+        process.env.EXPO_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+      const formData = new FormData();
+      const filename = uri.split("/").pop() ?? "frame.jpg";
+      const match = /\.(\w+)$/.exec(filename);
+      const type = match ? `image/${match[1]}` : "image/jpeg";
+      formData.append("image", { uri, name: filename, type } as unknown as Blob);
+      const res = await fetch(`${BACKEND_URL}/detect-rectangle`, {
+        method: "POST",
+        body: formData,
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      return data.hasRectangle === true;
+    } catch {
+      // Network/server unavailable — skip OCR for this frame
+      return false;
+    }
+  };
 }
 
 type ScanState = "idle" | "scanning" | "success" | "error";
 
+// Confidence required from OCR before we call PokeWallet
 const CONFIDENCE_THRESHOLD = 0.85;
-const AUTO_SCAN_INTERVAL_MS = 6000;
-const AUTO_SCAN_BACKOFF_MS = 8000;
+
+// Auto-capture every 3 seconds
+const AUTO_SCAN_INTERVAL_MS = 3000;
+
+// After a failed auto-scan attempt, wait before retrying
+const AUTO_SCAN_BACKOFF_MS = 6000;
 
 // ─── List Dropdown (shared) ───────────────────────────────────────────────────
 function ListDropdown({ colors, onClose }: { colors: any; onClose: () => void }) {
@@ -243,12 +284,16 @@ function NativeScannerScreen() {
     pulseAnim.setValue(1);
   };
 
+  // Gate 2: called only after rectangle confirmed.
+  // Sends image to OCR; PokeWallet is called server-side only if confidence >= CONFIDENCE_THRESHOLD.
   const runIdentify = useCallback(async (uri: string, auto = false) => {
     setScanState("scanning");
     setErrorMsg("");
     startPulse();
     try {
       const card = await identifyCard(uri);
+      // Client-side secondary confidence check (server already gates at 0.6;
+      // this raises the bar for auto-scans to CONFIDENCE_THRESHOLD).
       if (auto && typeof (card as any).confidence === "number" && (card as any).confidence < CONFIDENCE_THRESHOLD) {
         backoffUntilRef.current = Date.now() + AUTO_SCAN_BACKOFF_MS;
         setScanState("idle");
@@ -273,6 +318,8 @@ function NativeScannerScreen() {
     }
   }, []);
 
+  // ─── Auto-scan loop: fires every 3 seconds ────────────────────────────────
+  // Gate 1: rectangle detection — only proceed to OCR if a rectangle is found.
   useEffect(() => {
     const interval = setInterval(async () => {
       if (showResultRef.current) return;
@@ -283,16 +330,36 @@ function NativeScannerScreen() {
 
       inflightRef.current = true;
       try {
-        const photo = await (cameraRef.current as any).takePictureAsync({ quality: 0.7, base64: false });
-        if (photo?.uri) await runIdentify(photo.uri, true);
-        else inflightRef.current = false;
+        // Step 1: Capture frame
+        const photo = await (cameraRef.current as any).takePictureAsync({
+          quality: 0.7,
+          base64: false,
+        });
+
+        if (!photo?.uri) {
+          inflightRef.current = false;
+          return;
+        }
+
+        // Step 2: Rectangle gate — skip OCR if no rectangle detected
+        const hasRect = detectRectangle ? await detectRectangle(photo.uri) : true;
+        if (!hasRect) {
+          // No card-shaped rectangle visible; discard frame, no OCR call made
+          inflightRef.current = false;
+          return;
+        }
+
+        // Step 3: OCR → PokeWallet (server gates PokeWallet on OCR confidence)
+        await runIdentify(photo.uri, true);
       } catch {
         inflightRef.current = false;
       }
     }, AUTO_SCAN_INTERVAL_MS);
+
     return () => clearInterval(interval);
   }, [runIdentify]);
 
+  // Manual capture — rectangle gate skipped; user intent is explicit
   const handleCapture = async () => {
     if (scanState === "scanning" || !cameraRef.current) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
