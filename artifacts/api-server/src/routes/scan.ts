@@ -6,8 +6,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const POKEWALLET_BASE = "https://api.pokewallet.io";
 
-// Step 1: Use vision AI only for OCR — extract name + set number from the card
-async function ocrCard(imageBase64: string, mimeType: string): Promise<{ name: string; number: string; confidence: number }> {
+async function ocrCard(imageBase64: string, mimeType: string): Promise<{ name: string; number: string | null; confidence: number }> {
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -52,12 +51,10 @@ Rules:
   return JSON.parse(jsonMatch[0]);
 }
 
-// Step 2: Look up the card on PokéWallet using name + number
 async function lookupCard(name: string, number: string | null): Promise<any> {
   const apiKey = process.env.POKEWALLET_API_KEY;
   if (!apiKey) throw new Error("POKEWALLET_API_KEY is not set");
 
-  // Build query: name + number gives best precision
   const query = number ? `${name} ${number}` : name;
 
   const res = await fetch(
@@ -73,36 +70,42 @@ async function lookupCard(name: string, number: string | null): Promise<any> {
   const data = await res.json() as any;
   if (!data.results?.length) return null;
 
-  // Return best match (first result)
   const best = data.results[0];
   const info = best.card_info;
   const tcg = best.tcgplayer;
-  const cm = best.cardmarket;
 
-  // Pick the most relevant price
-  const tcgPrice = tcg?.prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil")?.market_price
+  // Pick best USD price from TCGPlayer
+  const marketValue: number | undefined =
+    tcg?.prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil")?.market_price
     ?? tcg?.prices?.[0]?.market_price
-    ?? null;
+    ?? undefined;
 
-  const cmPrice = cm?.prices?.find((p: any) => p.variant_type === "normal" || p.variant_type === "holo")?.trend
-    ?? cm?.prices?.[0]?.trend
-    ?? null;
+  const lowValue: number | undefined =
+    tcg?.prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil")?.low_price
+    ?? tcg?.prices?.[0]?.low_price
+    ?? undefined;
 
+  const highValue: number | undefined =
+    tcg?.prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil")?.high_price
+    ?? tcg?.prices?.[0]?.high_price
+    ?? undefined;
+
+  // Return shape matching CardScanResult
   return {
-    id: best.id,
+    cardId: best.id ?? `${info.name}-${info.card_number}`,
     name: info.name,
-    set: info.set_name ?? null,
-    set_code: info.set_code ?? null,
+    set: info.set_name ?? "",
     number: info.card_number ?? null,
     rarity: info.rarity ?? null,
-    game: info.card_type ? "Pokemon" : "One Piece",
+    game: "Pokemon",
     hp: info.hp ?? null,
     stage: info.stage ?? null,
+    imageUrl: info.image_url ?? null,
     tcg_url: tcg?.url ?? null,
-    cm_url: cm?.product_url ?? null,
-    price_usd: tcgPrice,
-    price_eur: cmPrice,
-    confidence: 1.0, // database match = high confidence
+    marketValue,
+    lowValue,
+    highValue,
+    confidence: 1.0,
   };
 }
 
@@ -116,33 +119,30 @@ router.post("/identify-card", upload.single("image"), async (req, res) => {
     const imageBase64 = req.file.buffer.toString("base64");
     const mimeType = req.file.mimetype;
 
-    // Step 1: OCR the card
+    // Step 1: OCR
     const ocr = await ocrCard(imageBase64, mimeType);
     console.log("OCR result:", ocr);
 
-    // If confidence too low, return early so app retries
     if (ocr.confidence < 0.6 || !ocr.name) {
-      res.status(422).json({
-        error: "Could not read card clearly",
-        confidence: ocr.confidence,
-        ocr,
-      });
+      res.status(422).json({ error: "Could not read card clearly", confidence: ocr.confidence, ocr });
       return;
     }
 
-    // Step 2: Look up on PokéWallet
+    // Step 2: PokéWallet lookup
     const card = await lookupCard(ocr.name, ocr.number);
 
     if (!card) {
-      // Fall back to raw OCR result if no database match
+      // Graceful fallback — return OCR data without price
       res.json({
+        cardId: `ocr-${Date.now()}`,
         name: ocr.name,
         number: ocr.number,
-        set: null,
+        set: "",
         game: "Pokemon",
-        confidence: ocr.confidence * 0.7, // lower confidence — no DB match
-        price_usd: null,
-        price_eur: null,
+        confidence: ocr.confidence * 0.7,
+        marketValue: undefined,
+        lowValue: undefined,
+        highValue: undefined,
       });
       return;
     }
