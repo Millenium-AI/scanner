@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
+import * as WebBrowser from "expo-web-browser";
 import React from "react";
 import {
   Linking,
@@ -23,18 +24,55 @@ interface CardDetailModalProps {
   extraInfo?: React.ReactNode;
 }
 
-function buildEbayUrl(card: CardScanResult): string {
+function buildEbayWebUrl(card: CardScanResult): string {
   const parts = [card.name, card.set];
   if (card.number) parts.push(card.number);
   const q = encodeURIComponent(parts.join(" "));
-  return `https://www.ebay.com/sch/i.html?_nkw=${q}&_sacat=2536&LH_BIN=1&_sop=12`;
+  // LH_Complete=1 + LH_Sold=1 = sold/completed listings only, sorted by most recent
+  return `https://www.ebay.com/sch/i.html?_nkw=${q}&_sacat=2536&LH_Complete=1&LH_Sold=1&_sop=13`;
 }
 
 function buildEbayAppUrl(card: CardScanResult): string {
   const parts = [card.name, card.set];
   if (card.number) parts.push(card.number);
   const q = encodeURIComponent(parts.join(" "));
-  return `ebay://search?query=${q}`;
+  return `ebay://search?query=${q}&completed=true&sold=true`;
+}
+
+function buildTCGPlayerAppUrl(tcgUrl: string): string {
+  // TCGPlayer deep link — opens product page in-app if installed
+  return tcgUrl.replace("https://www.tcgplayer.com", "tcgplayer://");
+}
+
+async function openTCGPlayer(tcgUrl: string) {
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  const appUrl = buildTCGPlayerAppUrl(tcgUrl);
+  const canOpen = await Linking.canOpenURL(appUrl).catch(() => false);
+  if (canOpen) {
+    await Linking.openURL(appUrl);
+  } else {
+    await WebBrowser.openBrowserAsync(tcgUrl, {
+      presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
+      toolbarColor: "#1A56DB",
+      enableBarCollapsing: true,
+    });
+  }
+}
+
+async function openEbay(card: CardScanResult) {
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  const appUrl = buildEbayAppUrl(card);
+  const webUrl = buildEbayWebUrl(card);
+  const canOpen = await Linking.canOpenURL(appUrl).catch(() => false);
+  if (canOpen) {
+    await Linking.openURL(appUrl);
+  } else {
+    await WebBrowser.openBrowserAsync(webUrl, {
+      presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
+      toolbarColor: "#E53238",
+      enableBarCollapsing: true,
+    });
+  }
 }
 
 export function CardDetailModal({ card, visible, onClose, extraInfo }: CardDetailModalProps) {
@@ -46,19 +84,6 @@ export function CardDetailModal({ card, visible, onClose, extraInfo }: CardDetai
   const tcgUrl = (card as any).tcg_url
     ? (card as any).tcg_url
     : `https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent(card.name + " " + card.set)}&view=grid`;
-
-  const handleTCGPlayer = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await Linking.openURL(tcgUrl);
-  };
-
-  const handleEbay = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const appUrl = buildEbayAppUrl(card);
-    const webUrl = buildEbayUrl(card);
-    const canOpen = await Linking.canOpenURL(appUrl).catch(() => false);
-    await Linking.openURL(canOpen ? appUrl : webUrl);
-  };
 
   const metaItems = [
     { label: "Set", value: card.set || "—" },
@@ -117,7 +142,7 @@ export function CardDetailModal({ card, visible, onClose, extraInfo }: CardDetai
 
             {extraInfo && <View style={styles.extraInfo}>{extraInfo}</View>}
 
-            {/* Market price — single value, full width */}
+            {/* Market price */}
             <View style={[styles.marketBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <Text style={[styles.marketLabel, { color: colors.mutedForeground }]}>MARKET PRICE</Text>
               <Text style={[styles.marketValue, { color: colors.accent }]}>
@@ -139,7 +164,7 @@ export function CardDetailModal({ card, visible, onClose, extraInfo }: CardDetai
             <View style={styles.actionRow}>
               <Pressable
                 style={[styles.actionBtn, { backgroundColor: "#1A56DB" }]}
-                onPress={handleTCGPlayer}
+                onPress={() => openTCGPlayer(tcgUrl)}
               >
                 <Ionicons name="pricetag-outline" size={18} color="#fff" />
                 <Text style={styles.actionBtnText}>TCGPlayer</Text>
@@ -147,10 +172,10 @@ export function CardDetailModal({ card, visible, onClose, extraInfo }: CardDetai
 
               <Pressable
                 style={[styles.actionBtn, { backgroundColor: "#E53238" }]}
-                onPress={handleEbay}
+                onPress={() => openEbay(card)}
               >
                 <Ionicons name="cart-outline" size={18} color="#fff" />
-                <Text style={styles.actionBtnText}>eBay</Text>
+                <Text style={styles.actionBtnText}>eBay Sold</Text>
               </Pressable>
             </View>
           </ScrollView>
