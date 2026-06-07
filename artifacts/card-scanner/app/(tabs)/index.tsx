@@ -1,6 +1,6 @@
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
-import React, { useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -23,6 +23,7 @@ let CameraView: React.ComponentType<{
   ref?: React.Ref<unknown>;
   style?: object;
   facing?: "back" | "front";
+  flash?: "on" | "off" | "auto";
 }> | null = null;
 
 let useCameraPermissions: (() => [
@@ -38,6 +39,9 @@ if (Platform.OS !== "web") {
 }
 
 type ScanState = "idle" | "scanning" | "success" | "error";
+
+const CONFIDENCE_THRESHOLD = 0.85;
+const AUTO_SCAN_INTERVAL_MS = 2000;
 
 // ─── Web version: camera capture or gallery upload ───────────────────────────
 function WebScannerScreen() {
@@ -160,7 +164,7 @@ function WebScannerScreen() {
   );
 }
 
-// ─── Native version: live camera + upload fallback ────────────────────────────
+// ─── Native version: live camera + auto-scan + flash toggle ──────────────────
 function NativeScannerScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -169,18 +173,24 @@ function NativeScannerScreen() {
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [resultCard, setResultCard] = useState<CardScanResult | null>(null);
   const [showResult, setShowResult] = useState(false);
+  const [flash, setFlash] = useState<"on" | "off">("off");
   const { lists, activeScanListId } = useScanContext();
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const [permission, requestPermission] = useCameraPermissions!();
   const activeList = lists.find((l) => l.id === activeScanListId);
+  const scanStateRef = useRef<ScanState>("idle");
+  const showResultRef = useRef(false);
 
-  // Tracks the measured position of the scan box so the dim overlay aligns exactly
   const [frameLayout, setFrameLayout] = useState<{
     x: number;
     y: number;
     width: number;
     height: number;
   } | null>(null);
+
+  // Keep refs in sync so the interval closure always sees latest values
+  useEffect(() => { scanStateRef.current = scanState; }, [scanState]);
+  useEffect(() => { showResultRef.current = showResult; }, [showResult]);
 
   const startPulse = () => {
     Animated.loop(
@@ -196,24 +206,53 @@ function NativeScannerScreen() {
     pulseAnim.setValue(1);
   };
 
-  const runIdentify = async (uri: string) => {
+  const runIdentify = useCallback(async (uri: string, auto = false) => {
     setScanState("scanning");
     setErrorMsg("");
     startPulse();
     try {
       const card = await identifyCard(uri);
+      // For auto-scan, apply confidence gate — retry silently if too low
+      if (auto && typeof (card as any).confidence === "number" && (card as any).confidence < CONFIDENCE_THRESHOLD) {
+        setScanState("idle");
+        return;
+      }
       setResultCard(card);
       setShowResult(true);
       setScanState("success");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : "Failed to identify card");
-      setScanState("error");
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      if (auto) {
+        // Silent retry on auto-scan errors
+        setScanState("idle");
+      } else {
+        setErrorMsg(err instanceof Error ? err.message : "Failed to identify card");
+        setScanState("error");
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      }
     } finally {
       stopPulse();
     }
-  };
+  }, []);
+
+  // ── Auto-scan interval ────────────────────────────────────────────────────
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (scanStateRef.current !== "idle" || showResultRef.current) return;
+      if (!cameraRef.current) return;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const photo = await (cameraRef.current as any).takePictureAsync({
+          quality: 0.82,
+          base64: false,
+        });
+        if (photo?.uri) await runIdentify(photo.uri, true);
+      } catch {
+        // Camera not ready yet — skip this tick
+      }
+    }, AUTO_SCAN_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [runIdentify]);
 
   const handleCapture = async () => {
     if (scanState === "scanning" || !cameraRef.current) return;
@@ -224,7 +263,7 @@ function NativeScannerScreen() {
         quality: 0.85,
         base64: false,
       });
-      if (photo?.uri) await runIdentify(photo.uri);
+      if (photo?.uri) await runIdentify(photo.uri, false);
     } catch {
       setScanState("error");
       setErrorMsg("Failed to capture photo");
@@ -233,7 +272,7 @@ function NativeScannerScreen() {
 
   const handleUpload = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: "images", quality: 0.85 });
-    if (!result.canceled && result.assets[0]) await runIdentify(result.assets[0].uri);
+    if (!result.canceled && result.assets[0]) await runIdentify(result.assets[0].uri, false);
   };
 
   const handleScanAgain = () => {
@@ -273,35 +312,20 @@ function NativeScannerScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: "#000" }]}>
-      <NativeCam ref={cameraRef as React.Ref<unknown>} style={StyleSheet.absoluteFill} facing="back" />
+      <NativeCam
+        ref={cameraRef as React.Ref<unknown>}
+        style={StyleSheet.absoluteFill}
+        facing="back"
+        flash={flash}
+      />
 
-      {/* ── Dim overlay: 4 panels cut around the measured frame position ── */}
+      {/* ── Dim overlay ── */}
       {frameLayout && (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          {/* Top */}
-          <View style={[styles.dimRegion, {
-            top: 0, left: 0, right: 0,
-            height: frameLayout.y,
-          }]} />
-          {/* Bottom */}
-          <View style={[styles.dimRegion, {
-            top: frameLayout.y + frameLayout.height,
-            left: 0, right: 0, bottom: 0,
-          }]} />
-          {/* Left */}
-          <View style={[styles.dimRegion, {
-            top: frameLayout.y,
-            left: 0,
-            width: frameLayout.x,
-            height: frameLayout.height,
-          }]} />
-          {/* Right */}
-          <View style={[styles.dimRegion, {
-            top: frameLayout.y,
-            left: frameLayout.x + frameLayout.width,
-            right: 0,
-            height: frameLayout.height,
-          }]} />
+          <View style={[styles.dimRegion, { top: 0, left: 0, right: 0, height: frameLayout.y }]} />
+          <View style={[styles.dimRegion, { top: frameLayout.y + frameLayout.height, left: 0, right: 0, bottom: 0 }]} />
+          <View style={[styles.dimRegion, { top: frameLayout.y, left: 0, width: frameLayout.x, height: frameLayout.height }]} />
+          <View style={[styles.dimRegion, { top: frameLayout.y, left: frameLayout.x + frameLayout.width, right: 0, height: frameLayout.height }]} />
         </View>
       )}
 
@@ -314,7 +338,7 @@ function NativeScannerScreen() {
         </View>
       </View>
 
-      {/* Frame corners — onLayout is the source of truth for dim overlay position */}
+      {/* Frame corners */}
       <View style={styles.frameOverlay} pointerEvents="none">
         <Animated.View
           style={[styles.scanBox, { transform: [{ scale: pulseAnim }] }]}
@@ -328,7 +352,7 @@ function NativeScannerScreen() {
         <Text style={styles.nativeHint}>
           {scanState === "scanning" ? "Identifying…" :
             scanState === "error" ? errorMsg :
-            "Position the card within the frame"}
+            "Hold card steady — scanning automatically"}
         </Text>
       </View>
 
@@ -353,7 +377,16 @@ function NativeScannerScreen() {
           </View>
         </Pressable>
 
-        <View style={{ width: 44 }} />
+        <Pressable
+          style={styles.nativeUpload}
+          onPress={() => setFlash(f => f === "off" ? "on" : "off")}
+        >
+          <Ionicons
+            name={flash === "on" ? "flash" : "flash-off"}
+            size={22}
+            color={flash === "on" ? colors.accent : "rgba(255,255,255,0.7)"}
+          />
+        </Pressable>
       </View>
 
       <CardResultSheet
@@ -371,8 +404,8 @@ export default function ScannerScreen() {
   return <NativeScannerScreen />;
 }
 
-const FRAME_W = 220;
-const FRAME_H = 308;
+const FRAME_W = 260;
+const FRAME_H = 364;
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -407,7 +440,6 @@ const styles = StyleSheet.create({
   },
   uploadBtnText: { fontSize: 14, fontFamily: "Poppins_500Medium" },
 
-  // Native dim overlay — 4 absolute panels around the measured frame hole
   dimRegion: { position: "absolute", backgroundColor: "rgba(0,0,0,0.55)" },
 
   nativeHeader: {
@@ -449,7 +481,6 @@ const styles = StyleSheet.create({
   nativeCaptureRing: { width: 80, height: 80, borderRadius: 40, borderWidth: 3, alignItems: "center", justifyContent: "center" },
   nativeCaptureCore: { width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center" },
 
-  // Permission screen
   permIcon: { width: 80, height: 80, borderRadius: 40, alignItems: "center", justifyContent: "center", marginBottom: 8 },
   permTitle: { fontSize: 20, fontFamily: "Poppins_700Bold", textAlign: "center" },
   permSub: { fontSize: 14, fontFamily: "Poppins_400Regular", textAlign: "center", lineHeight: 22 },
