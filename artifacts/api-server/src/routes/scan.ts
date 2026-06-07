@@ -21,9 +21,6 @@ function buildProxyImageUrl(cardId: string): string {
   return `${base}/card-image/${encodeURIComponent(cardId)}`;
 }
 
-// Build marketplace URLs.
-// TCGPlayer: search by name + set name + collector number (e.g. "215/197")
-// eBay: same terms, filtered to sold listings in TCG category
 function buildMarketplaceUrls(
   name: string,
   setName: string | null,
@@ -111,8 +108,6 @@ function mapOnePieceResult(card: any): any {
   };
 }
 
-// TCGdex mapper — images come directly from TCGdex CDN
-// Format per docs: {base}/{quality}.{extension}  e.g. /high.webp
 function mapPokemonResultFromTCGdex(card: any, ocrSetName: string | null): any {
   const cardId: string = card.id;
   const pricing = card.pricing ?? {};
@@ -127,8 +122,6 @@ function mapPokemonResultFromTCGdex(card: any, ocrSetName: string | null): any {
         ? cm.avg
         : undefined;
 
-  // TCGdex returns bare URL e.g. https://assets.tcgdex.net/en/sv/sv3/215
-  // Correct format: {base}/{quality}.{extension} — note the DOT, not slash
   const imageBare: string | undefined = card.image;
   const imageUrl = imageBare ? `${imageBare}/high.webp` : undefined;
   console.log("[tcgdex] image bare:", imageBare, "-> imageUrl:", imageUrl);
@@ -240,13 +233,13 @@ function normalizeStr(raw: string | null | undefined): string {
   return raw.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-// --- Pokemon lookup via TCGdex direct API ---
+// --- Pokemon lookup via TCGdex — returns ALL matching variants ---
 
-async function lookupPokemonCardViaTCGdex(
+async function lookupPokemonVariantsViaTCGdex(
   name: string,
   number: string | null,
   setName: string | null
-): Promise<any> {
+): Promise<any[]> {
   const { local } = parsePokemonCollectorNumber(number);
 
   let candidates: any[] = [];
@@ -283,54 +276,69 @@ async function lookupPokemonCardViaTCGdex(
 
   if (!Array.isArray(candidates) || candidates.length === 0) {
     console.log("[tcgdex] no candidates for:", name, number, setName);
-    return null;
+    return [];
   }
 
-  let picked = candidates[0];
-
+  // If setName narrows it to a single card, skip multi-variant logic
+  let pool = candidates;
   if (setName && candidates.length > 1) {
     const target = normalizeStr(setName);
-    const bySet = candidates.find((c: any) => {
+    const bySet = candidates.filter((c: any) => {
       const norm = normalizeStr(c.set?.name);
       return norm === target || norm.includes(target) || target.includes(norm);
     });
-    if (bySet) {
-      picked = bySet;
-      console.log("[tcgdex] narrowed by setName to:", picked.id);
-    }
+    if (bySet.length > 0) pool = bySet;
   }
 
-  console.log("[tcgdex] fetching full card:", picked.id, "set:", picked.set?.name);
+  // Fetch full card data for all candidates in parallel (cap at 10 to avoid hammering)
+  const fetched = await Promise.all(
+    pool.slice(0, 10).map(async (c: any) => {
+      try {
+        const r = await fetch(`${TCGDEX_BASE}/cards/${encodeURIComponent(c.id)}`);
+        if (!r.ok) return null;
+        return mapPokemonResultFromTCGdex(await r.json(), setName);
+      } catch {
+        return null;
+      }
+    })
+  );
 
-  const fullRes = await fetch(`${TCGDEX_BASE}/cards/${encodeURIComponent(picked.id)}`);
-  if (!fullRes.ok) throw new Error(`TCGdex card fetch failed (${fullRes.status}) id=${picked.id}`);
-  const fullCard = await fullRes.json();
-
-  return mapPokemonResultFromTCGdex(fullCard, setName);
+  return fetched.filter(Boolean);
 }
 
-async function lookupOnePieceCard(name: string, number: string | null, apiKey: string): Promise<any> {
+// --- One Piece lookup — returns ALL matching variants ---
+
+async function lookupOnePieceVariants(name: string, number: string | null, apiKey: string): Promise<any[]> {
   const queries = number ? [number, name] : [name];
   for (const q of queries) {
     const res = await fetch(
-      `${POKEWALLET_BASE}/op/search?q=${encodeURIComponent(q)}&limit=5`,
+      `${POKEWALLET_BASE}/op/search?q=${encodeURIComponent(q)}&limit=10`,
       { headers: pokeHeaders(apiKey) }
     );
     if (!res.ok) continue;
     const data = (await res.json()) as any;
     if (!data.data?.length) continue;
-    return mapOnePieceResult(data.data[0]);
+    // Group by card_number — same number = same print, multiple entries = variants
+    const results: any[] = data.data.map(mapOnePieceResult);
+    return results;
   }
-  return null;
+  return [];
 }
 
-async function lookupCard(name: string, number: string | null, game: string, setName: string | null): Promise<any> {
+// --- Unified lookup — always returns an array ---
+
+async function lookupCardVariants(
+  name: string,
+  number: string | null,
+  game: string,
+  setName: string | null
+): Promise<any[]> {
   const apiKey = process.env.POKEWALLET_API_KEY;
   if (game.toLowerCase() === "one piece") {
     if (!apiKey) throw new Error("POKEWALLET_API_KEY not set for One Piece");
-    return lookupOnePieceCard(name, number, apiKey);
+    return lookupOnePieceVariants(name, number, apiKey);
   }
-  return lookupPokemonCardViaTCGdex(name, number, setName);
+  return lookupPokemonVariantsViaTCGdex(name, number, setName);
 }
 
 // --- Price refresh ---
@@ -430,13 +438,29 @@ router.post("/identify-card", upload.single("image"), async (req, res) => {
     if (!ocr.name) { res.status(422).json({ error: "Could not read card name", confidence: ocr.confidence }); return; }
     if (ocr.confidence < 0.75) { res.status(422).json({ error: "Could not read card clearly", confidence: ocr.confidence }); return; }
     if (ocr.name.trim().length < 2) { res.status(422).json({ error: "Card name too short", confidence: ocr.confidence }); return; }
-    const card = await lookupCard(ocr.name, ocr.number, ocr.game, ocr.setName);
-    if (!card) {
+
+    const variants = await lookupCardVariants(ocr.name, ocr.number, ocr.game, ocr.setName);
+
+    // No match at all — return OCR-only stub
+    if (variants.length === 0) {
       const { tcg_url, ebay_url } = buildMarketplaceUrls(ocr.name, ocr.setName, ocr.number);
-      res.json({ cardId: `ocr-${Date.now()}`, name: ocr.name, number: ocr.number, set: ocr.setName ?? "", game: ocr.game, tcg_url, ebay_url, confidence: ocr.confidence * 0.7 });
+      res.json({
+        variants: [{
+          cardId: `ocr-${Date.now()}`,
+          name: ocr.name,
+          number: ocr.number,
+          set: ocr.setName ?? "",
+          game: ocr.game,
+          tcg_url,
+          ebay_url,
+          confidence: ocr.confidence * 0.7,
+        }],
+      });
       return;
     }
-    res.json(card);
+
+    // Always return { variants: [...] } — client decides whether to show picker
+    res.json({ variants });
   } catch (err: unknown) {
     console.error("[identify-card] error:", err);
     res.status(500).json({ error: "Failed to identify card", message: err instanceof Error ? err.message : String(err) });
