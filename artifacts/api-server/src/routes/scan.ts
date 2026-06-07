@@ -5,7 +5,6 @@ const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 const POKEWALLET_BASE = "https://api.pokewallet.io";
-const TCGDEX_BASE = "https://api.tcgdex.net/v2";
 
 // --- Helpers ---
 
@@ -13,8 +12,6 @@ function pokeHeaders(apiKey: string) {
   return { "X-API-Key": apiKey, Authorization: `Bearer ${apiKey}` };
 }
 
-// Builds a proxied image URL for PokeWallet cards (scans + One Piece).
-// TCGdex cards use public CDN URLs directly — no proxy needed.
 function buildImageUrl(cardId: string): string {
   const base =
     process.env.BACKEND_PUBLIC_URL ??
@@ -24,6 +21,7 @@ function buildImageUrl(cardId: string): string {
 }
 
 // --- In-memory cache (1 hour TTL, max 500 entries) ---
+// Repeated searches cost zero API calls
 const searchCache = new Map<string, { data: any[]; ts: number }>();
 const CACHE_TTL = 1000 * 60 * 60;
 
@@ -41,61 +39,21 @@ function setCache(key: string, data: any[]) {
   }
 }
 
-// --- TCGdex mapper (Pokemon search only) ---
-// TCGdex is free, no API key, 130k+ cards, public CDN images, Cardmarket prices.
-// Docs: https://tcgdex.dev
-function mapTCGdexResult(card: any): any {
-  const variants = card.variants ?? {};
-  // Pick best available price from Cardmarket (EUR) or fallback
-  const priceVariants = ["holo", "reverse", "normal", "firstEdition"];
-  let marketValue: number | undefined;
-  let foilType: string | undefined;
+// --- PokeWallet result mappers ---
 
-  const foilLabels: Record<string, string> = {
-    holo: "Holofoil",
-    reverse: "Reverse Holofoil",
-    normal: "Normal",
-    firstEdition: "1st Edition",
-  };
+function mapPokemonResult(card: any): any {
+  const info = card.card_info;
+  const tcg = card.tcgplayer;
+  const cardId: string = card.id;
 
-  for (const v of priceVariants) {
-    const price = variants[v]?.averageSellPrice ?? variants[v]?.lowPrice;
-    if (price) {
-      marketValue = price;
-      foilType = foilLabels[v] ?? v;
-      break;
-    }
-  }
-
-  // TCGdex image base URL + quality suffix. Public CDN, no auth needed.
-  const imageUrl = card.image ? `${card.image}/low.webp` : null;
-  const imageUrlLarge = card.image ? `${card.image}/high.webp` : null;
-
-  return {
-    cardId: `tcgdex-${card.id}`,
-    name: card.name,
-    set: card.set?.name ?? "",
-    number: card.localId ?? null,
-    rarity: card.rarity ?? null,
-    game: "Pokemon",
-    imageUrl,
-    imageUrlLarge,
-    tcg_url: null,
-    marketValue,
-    foilType,
-    confidence: 1.0,
-  };
-}
-
-// --- PokeWallet result mappers (scans + One Piece search) ---
-
-function mapPokemonResult(best: any): any {
-  const info = best.card_info;
-  const tcg = best.tcgplayer;
-  const cardId: string = best.id;
   const pick = (prices: any[], field: string) =>
     prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil")?.[field] ??
     prices?.[0]?.[field] ?? undefined;
+
+  const priceEntry =
+    tcg?.prices?.find((p: any) => p.sub_type_name === "Normal" || p.sub_type_name === "Holofoil") ??
+    tcg?.prices?.[0];
+
   return {
     cardId,
     name: info.name,
@@ -106,20 +64,21 @@ function mapPokemonResult(best: any): any {
     imageUrl: buildImageUrl(cardId),
     tcg_url: tcg?.url ?? null,
     marketValue: pick(tcg?.prices, "market_price"),
+    foilType: priceEntry?.sub_type_name ?? null,
     confidence: 1.0,
   };
 }
 
-function mapOnePieceResult(best: any): any {
-  const tcg = best.tcgplayer;
-  const cm = best.cardmarket;
-  const cardId: string = best.id ?? `op-${best.card_number}`;
+function mapOnePieceResult(card: any): any {
+  const tcg = card.tcgplayer;
+  const cm = card.cardmarket;
+  const cardId: string = card.id ?? `op-${card.card_number}`;
   return {
     cardId,
-    name: best.name,
-    set: best.card_number?.split("-")[0] ?? "",
-    number: best.card_number ?? null,
-    rarity: best.rarity ?? null,
+    name: card.name,
+    set: card.card_number?.split("-")[0] ?? "",
+    number: card.card_number ?? null,
+    rarity: card.rarity ?? null,
     game: "One Piece",
     imageUrl: buildImageUrl(cardId),
     tcg_url: tcg?.url ?? null,
@@ -179,7 +138,7 @@ Rules: JSON only, use null if unreadable, NEVER guess.`,
   };
 }
 
-// --- Scan lookups (PokeWallet - 1 call per scan) ---
+// --- Scan lookups (1 PokeWallet call per scan) ---
 
 async function lookupOnePieceCard(name: string, number: string | null, apiKey: string): Promise<any> {
   const queries = number ? [number, name] : [name];
@@ -215,7 +174,7 @@ async function lookupCard(name: string, number: string | null, game: string): Pr
   return lookupPokemonCard(name, number, apiKey);
 }
 
-// --- Price refresh (PokeWallet) ---
+// --- Price refresh ---
 
 async function lookupPriceById(cardId: string): Promise<{ cardId: string; marketValue?: number } | null> {
   const apiKey = process.env.POKEWALLET_API_KEY;
@@ -240,9 +199,7 @@ async function lookupPriceById(cardId: string): Promise<{ cardId: string; market
 
 // --- Routes ---
 
-// GET /card-image/:id
-// Proxies PokeWallet images for scan results and One Piece cards.
-// TCGdex Pokemon search cards use public CDN directly — this route not needed for those.
+// GET /card-image/:id — proxies PokeWallet images server-side. API key never sent to client.
 router.get("/card-image/:id", async (req, res) => {
   const apiKey = process.env.POKEWALLET_API_KEY;
   if (!apiKey) { res.status(500).json({ error: "API key not configured" }); return; }
@@ -263,25 +220,27 @@ router.get("/card-image/:id", async (req, res) => {
   }
 });
 
-// GET /search?q=charizard&game=pokemon&lang=en&limit=20
-// Pokemon  -> TCGdex (free, no key, public CDN images, Cardmarket prices, cached 1hr)
-// One Piece -> PokeWallet (only available source)
+// GET /search?q=charizard&game=pokemon&limit=20
+// Single PokeWallet call returns all matching cards with images + TCGPlayer prices.
+// Results cached 1 hour server-side — repeated searches cost zero API calls.
+// Pokemon -> PokeWallet /search (returns multiple results)
+// One Piece -> PokeWallet /op/search
 router.get("/search", async (req, res) => {
+  const apiKey = process.env.POKEWALLET_API_KEY;
+  if (!apiKey) { res.status(500).json({ error: "POKEWALLET_API_KEY not set" }); return; }
+
   const q = (req.query.q as string ?? "").trim();
   const game = (req.query.game as string ?? "pokemon").toLowerCase();
-  const lang = (req.query.lang as string ?? "en").toLowerCase();
   const limit = Math.min(Number(req.query.limit ?? 20), 50);
 
   if (!q) { res.json([]); return; }
 
-  const cacheKey = `${game}:${lang}:${q}`;
+  const cacheKey = `${game}:${q}`;
   const cached = getCached(cacheKey);
   if (cached) { res.json(cached); return; }
 
   try {
     if (game === "one piece") {
-      const apiKey = process.env.POKEWALLET_API_KEY;
-      if (!apiKey) { res.status(500).json({ error: "POKEWALLET_API_KEY not set" }); return; }
       const upstream = await fetch(
         `${POKEWALLET_BASE}/op/search?q=${encodeURIComponent(q)}&limit=${limit}`,
         { headers: pokeHeaders(apiKey) }
@@ -292,15 +251,14 @@ router.get("/search", async (req, res) => {
       setCache(cacheKey, results);
       res.json(results);
     } else {
-      // TCGdex: free, no API key, 130k+ cards, Cardmarket prices, public CDN images
-      const langCode = lang === "ja" ? "ja" : "en";
+      // Pokemon: 1 call, returns all matching cards with TCGPlayer prices + images
       const upstream = await fetch(
-        `${TCGDEX_BASE}/${langCode}/cards?name=${encodeURIComponent(q)}&pagination[page]=1&pagination[itemsPerPage]=${limit}`,
-        { headers: { "Accept": "application/json" } }
+        `${POKEWALLET_BASE}/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+        { headers: { ...pokeHeaders(apiKey), "Content-Type": "application/json" } }
       );
       if (!upstream.ok) { res.status(upstream.status).json({ error: "Search failed" }); return; }
-      const data = (await upstream.json()) as any[];
-      const results = (Array.isArray(data) ? data : []).map(mapTCGdexResult);
+      const data = (await upstream.json()) as any;
+      const results = (data.results ?? []).map(mapPokemonResult);
       setCache(cacheKey, results);
       res.json(results);
     }
