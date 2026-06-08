@@ -16,6 +16,10 @@
 [build.environment]
   # Expo web export targets Node; pin a modern Node for the Netlify builder.
   NODE_VERSION = "20"
+  # Pin pnpm to the major version the lockfile (lockfileVersion 9.0) was built
+  # with. pnpm 10 changes how `overrides` are compared against the lockfile and
+  # fails the frozen install with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
+  PNPM_VERSION = "9.15.9"
   # The card-identify backend the app talks to. Override in the Netlify UI
   # (Site settings -> Environment variables) with your real HTTPS endpoint.
   # Must be HTTPS in production or the browser will block the mixed-content fetch.
