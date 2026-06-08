@@ -3,11 +3,11 @@ import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Platform, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
 
-// ── Native-only modules — loaded with require() so Metro does not attempt to
-// resolve them when bundling for web (top-level imports always get resolved).
+// Native-only modules — lazy require so Metro doesn’t resolve them on web
 let isLiquidGlassAvailable: (() => boolean) | null = null;
 let NativeTabs: any = null;
 let NativeTabsIcon: any = null;
@@ -16,18 +16,17 @@ let SymbolView: any = null;
 
 if (Platform.OS !== "web") {
   try {
-    const glassEffect = require("expo-glass-effect");
-    isLiquidGlassAvailable = glassEffect.isLiquidGlassAvailable;
+    const g = require("expo-glass-effect");
+    isLiquidGlassAvailable = g.isLiquidGlassAvailable;
   } catch {}
   try {
-    const nativeTabs = require("expo-router/unstable-native-tabs");
-    NativeTabs = nativeTabs.NativeTabs;
-    NativeTabsIcon = nativeTabs.Icon;
-    NativeTabsLabel = nativeTabs.Label;
+    const nt = require("expo-router/unstable-native-tabs");
+    NativeTabs = nt.NativeTabs;
+    NativeTabsIcon = nt.Icon;
+    NativeTabsLabel = nt.Label;
   } catch {}
   try {
-    const symbols = require("expo-symbols");
-    SymbolView = symbols.SymbolView;
+    SymbolView = require("expo-symbols").SymbolView;
   } catch {}
 }
 
@@ -57,8 +56,12 @@ function NativeTabLayout() {
 
 function ClassicTabLayout() {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
+
+  // Tab bar height: 49px tabs + safe area bottom inset
+  const tabBarHeight = 49 + insets.bottom;
 
   return (
     <Tabs
@@ -72,14 +75,15 @@ function ClassicTabLayout() {
           borderTopWidth: 1,
           borderTopColor: colors.border,
           elevation: 0,
-          ...(isWeb ? { height: 84 } : {}),
+          height: tabBarHeight,
+          paddingBottom: insets.bottom,
         },
         tabBarBackground: () =>
           isIOS ? (
             <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
-          ) : isWeb ? (
+          ) : (
             <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.card }]} />
-          ) : null,
+          ),
         tabBarLabelStyle: { fontFamily: "Poppins_500Medium", fontSize: 11 },
       }}
     >
@@ -128,7 +132,6 @@ function ClassicTabLayout() {
 }
 
 export default function TabLayout() {
-  // On web, isLiquidGlassAvailable is null — always use ClassicTabLayout
   if (Platform.OS !== "web" && isLiquidGlassAvailable?.()) return <NativeTabLayout />;
   return <ClassicTabLayout />;
 }

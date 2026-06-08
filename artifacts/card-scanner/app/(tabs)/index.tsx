@@ -53,11 +53,13 @@ type ScanState = "idle" | "scanning" | "success" | "error";
 const SCREEN_W = Dimensions.get("window").width;
 const SCREEN_H = Dimensions.get("window").height;
 
-// Card frame dimensions
 const FRAME_W = 300;
 const FRAME_H = 420;
-// Shift the frame up from center so it clears the capture button row
-const FRAME_OFFSET_Y = -60;
+// Shift frame up so it doesn’t overlap the capture button row
+const FRAME_OFFSET_Y = -80;
+
+// Tab bar height used to offset the bottom control row
+const TAB_BAR_H = 49;
 
 async function cropToFrame(
   photoUri: string,
@@ -84,24 +86,12 @@ async function cropToFrame(
   }
 }
 
-// ─── Filter badge icon ────────────────────────────────────────────────────────
 function FilterIconButton({
-  count,
-  onPress,
-  dark,
-  colors,
-}: {
-  count: number;
-  onPress: () => void;
-  dark?: boolean;
-  colors: any;
-}) {
+  count, onPress, dark, colors,
+}: { count: number; onPress: () => void; dark?: boolean; colors: any }) {
   return (
     <Pressable
-      onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        onPress();
-      }}
+      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onPress(); }}
       style={[
         fStyles.btn,
         dark
@@ -110,11 +100,7 @@ function FilterIconButton({
       ]}
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
     >
-      <Ionicons
-        name="options-outline"
-        size={19}
-        color={dark ? "rgba(255,255,255,0.85)" : colors.foreground}
-      />
+      <Ionicons name="options-outline" size={19} color={dark ? "rgba(255,255,255,0.85)" : colors.foreground} />
       {count > 0 && (
         <View style={[fStyles.badge, { backgroundColor: colors.accent }]}>
           <Text style={[fStyles.badgeText, { color: colors.background }]}>{count}</Text>
@@ -124,7 +110,6 @@ function FilterIconButton({
   );
 }
 
-// ─── List Dropdown ────────────────────────────────────────────────────────────
 function ListDropdown({ colors, onClose }: { colors: any; onClose: () => void }) {
   const { lists, activeScanListId, setActiveScanListId } = useScanContext();
   return (
@@ -138,16 +123,10 @@ function ListDropdown({ colors, onClose }: { colors: any; onClose: () => void })
               <Pressable
                 key={list.id}
                 style={[ddStyles.item, active && { backgroundColor: colors.surface }]}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setActiveScanListId(list.id);
-                  onClose();
-                }}
+                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setActiveScanListId(list.id); onClose(); }}
               >
                 <View style={[ddStyles.dot, { backgroundColor: list.color }]} />
-                <Text style={[ddStyles.itemText, { color: active ? colors.foreground : colors.mutedForeground }]}>
-                  {list.name}
-                </Text>
+                <Text style={[ddStyles.itemText, { color: active ? colors.foreground : colors.mutedForeground }]}>{list.name}</Text>
                 {active && <Ionicons name="checkmark" size={16} color={colors.accent} />}
               </Pressable>
             );
@@ -158,43 +137,23 @@ function ListDropdown({ colors, onClose }: { colors: any; onClose: () => void })
   );
 }
 
-// ─── Active filter pills ──────────────────────────────────────────────────────
 function ActiveFilterPills({
-  filters,
-  colors,
-  dark,
-  onClear,
-}: {
-  filters: ScanFilters;
-  colors: any;
-  dark?: boolean;
-  onClear: (key: keyof ScanFilters) => void;
-}) {
+  filters, colors, dark, onClear,
+}: { filters: ScanFilters; colors: any; dark?: boolean; onClear: (key: keyof ScanFilters) => void }) {
   const pills: { key: keyof ScanFilters; label: string }[] = [];
   if (filters.game)     pills.push({ key: "game",     label: filters.game });
   if (filters.set)      pills.push({ key: "set",      label: filters.set });
   if (filters.language) pills.push({ key: "language", label: filters.language });
   if (filters.finish)   pills.push({ key: "finish",   label: filters.finish });
-
   return (
     <View style={pillStyles.row}>
       {pills.map(({ key, label }) => (
         <Pressable
           key={key}
-          style={[
-            pillStyles.pill,
-            dark
-              ? { backgroundColor: "rgba(255,255,255,0.18)" }
-              : { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 },
-          ]}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            onClear(key);
-          }}
+          style={[pillStyles.pill, dark ? { backgroundColor: "rgba(255,255,255,0.18)" } : { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onClear(key); }}
         >
-          <Text style={[pillStyles.pillText, { color: dark ? "#fff" : colors.foreground }]}>
-            {label}
-          </Text>
+          <Text style={[pillStyles.pillText, { color: dark ? "#fff" : colors.foreground }]}>{label}</Text>
           <Ionicons name="close" size={11} color={dark ? "rgba(255,255,255,0.7)" : colors.mutedForeground} />
         </Pressable>
       ))}
@@ -220,31 +179,30 @@ function WebScannerScreen() {
   const { lists, activeScanListId } = useScanContext();
   const activeList = lists.find((l) => l.id === activeScanListId);
   const filterCount = activeFilterCount(filters);
-
   const filtersRef = useRef<ScanFilters>(EMPTY_FILTERS);
 
-  const runIdentify = useCallback(
-    async (uri: string) => {
-      setScanState("scanning");
-      setErrorMsg("");
-      try {
-        const result = await identifyCard(uri, filtersRef.current);
-        if (result.type === "variants") {
-          setVariantCards(result.cards);
-          setShowVariantPicker(true);
-          setScanState("idle");
-          return;
-        }
-        setResultCard(result.card);
-        setShowResult(true);
-        setScanState("success");
-      } catch (err: unknown) {
-        setErrorMsg(err instanceof Error ? err.message : "Failed to identify card");
-        setScanState("error");
+  // Bottom of the capture row sits above the tab bar
+  const bottomPad = insets.bottom + TAB_BAR_H + 16;
+
+  const runIdentify = useCallback(async (uri: string) => {
+    setScanState("scanning");
+    setErrorMsg("");
+    try {
+      const result = await identifyCard(uri, filtersRef.current);
+      if (result.type === "variants") {
+        setVariantCards(result.cards);
+        setShowVariantPicker(true);
+        setScanState("idle");
+        return;
       }
-    },
-    []
-  );
+      setResultCard(result.card);
+      setShowResult(true);
+      setScanState("success");
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to identify card");
+      setScanState("error");
+    }
+  }, []);
 
   const handleCapture = async () => {
     if (scanState === "scanning" || !cameraRef.current) return;
@@ -257,26 +215,9 @@ function WebScannerScreen() {
     if (!result.canceled && result.assets[0]) await runIdentify(result.assets[0].uri);
   };
 
-  const handleScanAgain = () => {
-    setShowResult(false);
-    setResultCard(null);
-    setScanState("idle");
-    setErrorMsg("");
-  };
-
-  const handleVariantSelect = (card: CardScanResult) => {
-    setShowVariantPicker(false);
-    setVariantCards([]);
-    setResultCard(card);
-    setShowResult(true);
-    setScanState("success");
-  };
-
-  const handleVariantCancel = () => {
-    setShowVariantPicker(false);
-    setVariantCards([]);
-    setScanState("idle");
-  };
+  const handleScanAgain = () => { setShowResult(false); setResultCard(null); setScanState("idle"); setErrorMsg(""); };
+  const handleVariantSelect = (card: CardScanResult) => { setShowVariantPicker(false); setVariantCards([]); setResultCard(card); setShowResult(true); setScanState("success"); };
+  const handleVariantCancel = () => { setShowVariantPicker(false); setVariantCards([]); setScanState("idle"); };
 
   return (
     <View style={[styles.container, { backgroundColor: "#000" }]}>
@@ -296,9 +237,7 @@ function WebScannerScreen() {
               <Ionicons name="camera-outline" size={40} color={colors.accent} />
             </View>
             <Text style={[styles.permTitle, { color: colors.foreground }]}>Camera Access Required</Text>
-            <Text style={[styles.permSub, { color: colors.mutedForeground }]}>
-              Allow camera access in your browser settings and reload.
-            </Text>
+            <Text style={[styles.permSub, { color: colors.mutedForeground }]}>Allow camera access in your browser settings and reload.</Text>
             <Pressable onPress={handleUpload} style={styles.uploadLink}>
               <Text style={[styles.uploadLinkText, { color: colors.mutedForeground }]}>Upload a photo instead</Text>
             </Pressable>
@@ -321,27 +260,22 @@ function WebScannerScreen() {
 
       {filterCount > 0 && !cameraDenied && (
         <View style={[styles.nativeFilterPills, { top: insets.top + 64 }]}>
-          <ActiveFilterPills
-            filters={filters}
-            colors={colors}
-            dark
-            onClear={(key) => setFilters(f => ({ ...f, [key]: null }))}
-          />
+          <ActiveFilterPills filters={filters} colors={colors} dark onClear={(key) => setFilters(f => ({ ...f, [key]: null }))} />
         </View>
       )}
 
+      {/* Hint text below the frame */}
       {!cameraDenied && (
-        <View style={styles.frameOverlay} pointerEvents="none">
-          <Text style={[styles.nativeHint, { marginTop: FRAME_H + 16 + FRAME_OFFSET_Y + (SCREEN_H / 2 - FRAME_H / 2) }]}>
-            {scanState === "scanning" ? "Identifying…" :
-              scanState === "error" ? errorMsg :
-              "Tap the button to scan"}
+        <View style={[styles.hintRow, { bottom: bottomPad + 100 }]}>
+          <Text style={styles.nativeHint}>
+            {scanState === "scanning" ? "Identifying…" : scanState === "error" ? errorMsg : "Tap the button to scan"}
           </Text>
         </View>
       )}
 
+      {/* Capture controls */}
       {!cameraDenied && (
-        <View style={[styles.nativeBottom, { paddingBottom: insets.bottom + 32 }]}>
+        <View style={[styles.nativeBottom, { paddingBottom: bottomPad }]}>
           <Pressable style={styles.nativeUpload} onPress={handleUpload} disabled={scanState === "scanning"}>
             <Ionicons name="image-outline" size={22} color="rgba(255,255,255,0.7)" />
           </Pressable>
@@ -364,18 +298,8 @@ function WebScannerScreen() {
       )}
 
       {showListDrop && <ListDropdown colors={colors} onClose={() => setShowListDrop(false)} />}
-      <ScanFilterSheet
-        visible={showFilters}
-        filters={filters}
-        onChange={setFilters}
-        onClose={() => setShowFilters(false)}
-      />
-      <VariantPickerModal
-        visible={showVariantPicker}
-        variants={variantCards}
-        onSelect={handleVariantSelect}
-        onCancel={handleVariantCancel}
-      />
+      <ScanFilterSheet visible={showFilters} filters={filters} onChange={setFilters} onClose={() => setShowFilters(false)} />
+      <VariantPickerModal visible={showVariantPicker} variants={variantCards} onSelect={handleVariantSelect} onCancel={handleVariantCancel} />
       <CardResultSheet visible={showResult} result={resultCard} onClose={handleScanAgain} onScanAgain={handleScanAgain} />
     </View>
   );
@@ -400,41 +324,35 @@ function NativeScannerScreen() {
   const [permission, requestPermission] = useCameraPermissions!();
   const activeList = lists.find((l) => l.id === activeScanListId);
   const filterCount = activeFilterCount(filters);
-
   const filtersRef = useRef<ScanFilters>(EMPTY_FILTERS);
   const [frameLayout, setFrameLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const frameLayoutRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
+  // Native bottom: sits above tab bar + home indicator
+  const bottomPad = insets.bottom + TAB_BAR_H + 16;
+
   const handleFrameLayout = useCallback((e: any) => {
     const node = e.target ?? e.nativeEvent?.target;
     if (node && typeof node.measure === "function") {
-      node.measure((_fx: number, _fy: number, width: number, height: number, pageX: number, pageY: number) => {
-        const layout = { x: pageX, y: pageY, width, height };
-        setFrameLayout(layout);
-        frameLayoutRef.current = layout;
+      node.measure((_fx: number, _fy: number, w: number, h: number, px: number, py: number) => {
+        const layout = { x: px, y: py, width: w, height: h };
+        setFrameLayout(layout); frameLayoutRef.current = layout;
       });
     } else {
       const { x, y, width, height } = e.nativeEvent.layout;
       const layout = { x, y, width, height };
-      setFrameLayout(layout);
-      frameLayoutRef.current = layout;
+      setFrameLayout(layout); frameLayoutRef.current = layout;
     }
   }, []);
 
   const runIdentify = useCallback(async (uri: string) => {
-    setScanState("scanning");
-    setErrorMsg("");
+    setScanState("scanning"); setErrorMsg("");
     try {
       const result = await identifyCard(uri, filtersRef.current);
       if (result.type === "variants") {
-        setVariantCards(result.cards);
-        setShowVariantPicker(true);
-        setScanState("idle");
-        return;
+        setVariantCards(result.cards); setShowVariantPicker(true); setScanState("idle"); return;
       }
-      setResultCard(result.card);
-      setShowResult(true);
-      setScanState("success");
+      setResultCard(result.card); setShowResult(true); setScanState("success");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to identify card");
@@ -443,21 +361,6 @@ function NativeScannerScreen() {
     }
   }, []);
 
-  const handleVariantSelect = (card: CardScanResult) => {
-    setShowVariantPicker(false);
-    setVariantCards([]);
-    setResultCard(card);
-    setShowResult(true);
-    setScanState("success");
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  };
-
-  const handleVariantCancel = () => {
-    setShowVariantPicker(false);
-    setVariantCards([]);
-    setScanState("idle");
-  };
-
   const handleCapture = async () => {
     if (scanState === "scanning" || !cameraRef.current) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -465,14 +368,11 @@ function NativeScannerScreen() {
       const photo = await (cameraRef.current as any).takePictureAsync({ quality: 0.9, base64: false });
       if (!photo?.uri) return;
       const frame = frameLayoutRef.current;
-      const uri = frame && photo.width && photo.height
-        ? await cropToFrame(photo.uri, photo.width, photo.height, frame)
-        : photo.uri;
+      const uri = frame && photo.width && photo.height ? await cropToFrame(photo.uri, photo.width, photo.height, frame) : photo.uri;
       await runIdentify(uri);
     } catch (err) {
       console.warn("[handleCapture] error:", err);
-      setScanState("error");
-      setErrorMsg("Failed to capture photo");
+      setScanState("error"); setErrorMsg("Failed to capture photo");
     }
   };
 
@@ -481,16 +381,11 @@ function NativeScannerScreen() {
     if (!result.canceled && result.assets[0]) await runIdentify(result.assets[0].uri);
   };
 
-  const handleScanAgain = () => {
-    setShowResult(false);
-    setResultCard(null);
-    setScanState("idle");
-    setErrorMsg("");
-  };
+  const handleScanAgain = () => { setShowResult(false); setResultCard(null); setScanState("idle"); setErrorMsg(""); };
+  const handleVariantSelect = (card: CardScanResult) => { setShowVariantPicker(false); setVariantCards([]); setResultCard(card); setShowResult(true); setScanState("success"); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); };
+  const handleVariantCancel = () => { setShowVariantPicker(false); setVariantCards([]); setScanState("idle"); };
 
-  if (!permission) {
-    return <View style={[styles.centered, { backgroundColor: colors.background }]}><ActivityIndicator color={colors.accent} /></View>;
-  }
+  if (!permission) return <View style={[styles.centered, { backgroundColor: colors.background }]}><ActivityIndicator color={colors.accent} /></View>;
 
   if (!permission.granted) {
     return (
@@ -499,9 +394,7 @@ function NativeScannerScreen() {
           <Ionicons name="camera-outline" size={40} color={colors.accent} />
         </View>
         <Text style={[styles.permTitle, { color: colors.foreground }]}>Camera Access Required</Text>
-        <Text style={[styles.permSub, { color: colors.mutedForeground }]}>
-          Allow camera access to scan trading cards in real time
-        </Text>
+        <Text style={[styles.permSub, { color: colors.mutedForeground }]}>Allow camera access to scan trading cards in real time</Text>
         {permission.canAskAgain && (
           <Pressable style={[styles.permBtn, { backgroundColor: colors.accent }]} onPress={requestPermission}>
             <Text style={[styles.permBtnText, { color: colors.background }]}>Allow Camera</Text>
@@ -518,12 +411,7 @@ function NativeScannerScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: "#000" }]}>
-      <NativeCam
-        ref={cameraRef as React.Ref<unknown>}
-        style={StyleSheet.absoluteFill}
-        facing="back"
-        flash={flash}
-      />
+      <NativeCam ref={cameraRef as React.Ref<unknown>} style={StyleSheet.absoluteFill} facing="back" flash={flash} />
 
       {frameLayout && (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -548,33 +436,23 @@ function NativeScannerScreen() {
 
       {filterCount > 0 && (
         <View style={[styles.nativeFilterPills, { top: insets.top + 64 }]}>
-          <ActiveFilterPills
-            filters={filters}
-            colors={colors}
-            dark
-            onClear={(key) => setFilters(f => ({ ...f, [key]: null }))}
-          />
+          <ActiveFilterPills filters={filters} colors={colors} dark onClear={(key) => setFilters(f => ({ ...f, [key]: null }))} />
         </View>
       )}
 
       <View style={[styles.frameOverlay, { marginTop: FRAME_OFFSET_Y }]} pointerEvents="none">
-        <View
-          style={[styles.scanBox]}
-          onLayout={handleFrameLayout}
-        >
+        <View style={styles.scanBox} onLayout={handleFrameLayout}>
           <View style={[styles.corner, styles.cornerTL, { borderColor: colors.accent }]} />
           <View style={[styles.corner, styles.cornerTR, { borderColor: colors.accent }]} />
           <View style={[styles.corner, styles.cornerBL, { borderColor: colors.accent }]} />
           <View style={[styles.corner, styles.cornerBR, { borderColor: colors.accent }]} />
         </View>
         <Text style={styles.nativeHint}>
-          {scanState === "scanning" ? "Identifying…" :
-            scanState === "error" ? errorMsg :
-            "Tap the button to scan"}
+          {scanState === "scanning" ? "Identifying…" : scanState === "error" ? errorMsg : "Tap the button to scan"}
         </Text>
       </View>
 
-      <View style={[styles.nativeBottom, { paddingBottom: insets.bottom + 32 }]}>
+      <View style={[styles.nativeBottom, { paddingBottom: bottomPad }]}>
         <Pressable style={styles.nativeUpload} onPress={handleUpload} disabled={scanState === "scanning"}>
           <Ionicons name="image-outline" size={22} color="rgba(255,255,255,0.7)" />
         </Pressable>
@@ -585,35 +463,18 @@ function NativeScannerScreen() {
         >
           <View style={[styles.nativeCaptureRing, { borderColor: colors.accent }]}>
             <View style={[styles.nativeCaptureCore, { backgroundColor: colors.accent }]}>
-              {scanState === "scanning"
-                ? <ActivityIndicator color={colors.background} size="small" />
-                : <Ionicons name="scan" size={26} color={colors.background} />
-              }
+              {scanState === "scanning" ? <ActivityIndicator color={colors.background} size="small" /> : <Ionicons name="scan" size={26} color={colors.background} />}
             </View>
           </View>
         </Pressable>
         <Pressable style={styles.nativeUpload} onPress={() => setFlash(f => f === "off" ? "on" : "off")}>
-          <Ionicons
-            name={flash === "on" ? "flash" : "flash-off"}
-            size={22}
-            color={flash === "on" ? colors.accent : "rgba(255,255,255,0.7)"}
-          />
+          <Ionicons name={flash === "on" ? "flash" : "flash-off"} size={22} color={flash === "on" ? colors.accent : "rgba(255,255,255,0.7)"} />
         </Pressable>
       </View>
 
       {showListDrop && <ListDropdown colors={colors} onClose={() => setShowListDrop(false)} />}
-      <ScanFilterSheet
-        visible={showFilters}
-        filters={filters}
-        onChange={setFilters}
-        onClose={() => setShowFilters(false)}
-      />
-      <VariantPickerModal
-        visible={showVariantPicker}
-        variants={variantCards}
-        onSelect={handleVariantSelect}
-        onCancel={handleVariantCancel}
-      />
+      <ScanFilterSheet visible={showFilters} filters={filters} onChange={setFilters} onClose={() => setShowFilters(false)} />
+      <VariantPickerModal visible={showVariantPicker} variants={variantCards} onSelect={handleVariantSelect} onCancel={handleVariantCancel} />
       <CardResultSheet visible={showResult} result={resultCard} onClose={handleScanAgain} onScanAgain={handleScanAgain} />
     </View>
   );
@@ -636,6 +497,7 @@ const styles = StyleSheet.create({
   listBadgeDarkText: { color: "rgba(255,255,255,0.9)", fontSize: 12, fontFamily: "Poppins_600SemiBold" },
   frameOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 20, pointerEvents: "none" as "none" },
   scanBox: { width: FRAME_W, height: FRAME_H, position: "relative" },
+  hintRow: { position: "absolute", left: 0, right: 0, alignItems: "center" },
   nativeHint: { color: "rgba(255,255,255,0.85)", fontSize: 13, fontFamily: "Poppins_400Regular", textAlign: "center", paddingHorizontal: 40 },
   corner: { position: "absolute", width: 26, height: 26, borderWidth: 3 },
   cornerTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 6 },
