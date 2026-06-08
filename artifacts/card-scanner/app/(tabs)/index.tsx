@@ -58,6 +58,10 @@ const AUTO_SCAN_BACKOFF_MS = 6000;
 const SCREEN_W = Dimensions.get("window").width;
 const SCREEN_H = Dimensions.get("window").height;
 
+// Fixed card frame dimensions — used by both web overlay and native scan box
+const FRAME_W = 300;
+const FRAME_H = 420;
+
 async function cropToFrame(
   photoUri: string,
   photoWidth: number,
@@ -181,7 +185,6 @@ function WebScannerScreen() {
 
   const backoffRef = useRef<() => void>(() => {});
 
-  // Auto-scan should pause whenever we're busy or showing a result.
   const autoScanEnabled =
     !cameraDenied &&
     scanState === "idle" &&
@@ -206,7 +209,6 @@ function WebScannerScreen() {
           typeof card.confidence === "number" &&
           card.confidence < CONFIDENCE_THRESHOLD
         ) {
-          // Low-confidence auto scan: back off and keep streaming.
           backoffRef.current?.();
           setScanState("idle");
           return;
@@ -216,7 +218,6 @@ function WebScannerScreen() {
         setScanState("success");
       } catch (err: unknown) {
         if (auto) {
-          // Don't surface auto-scan errors; just back off and retry.
           backoffRef.current?.();
           setScanState("idle");
           return;
@@ -229,9 +230,7 @@ function WebScannerScreen() {
   );
 
   const handleAutoCapture = useCallback(
-    (dataUri: string) => {
-      void runIdentify(dataUri, true);
-    },
+    (dataUri: string) => { void runIdentify(dataUri, true); },
     [runIdentify]
   );
 
@@ -278,13 +277,13 @@ function WebScannerScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: "#000" }]}>
-      {/* Live camera fills the screen behind the overlay */}
+      {/* Live camera fills the screen */}
       <View style={StyleSheet.absoluteFill}>
         {!cameraDenied ? (
           <WebCameraScanner
             ref={cameraRef}
-            frameWidth={SCREEN_W}
-            frameHeight={SCREEN_H}
+            frameWidth={FRAME_W}
+            frameHeight={FRAME_H}
             accentColor={colors.accent}
             onPermissionDenied={() => setCameraDenied(true)}
           />
@@ -328,7 +327,6 @@ function WebScannerScreen() {
         </View>
       )}
 
-      {/* Centered hint */}
       {!cameraDenied && (
         <View style={styles.frameOverlay} pointerEvents="none">
           <Text style={styles.nativeHint}>
@@ -339,7 +337,6 @@ function WebScannerScreen() {
         </View>
       )}
 
-      {/* Bottom controls */}
       {!cameraDenied && (
         <View style={[styles.nativeBottom, { paddingBottom: insets.bottom + 90 }]}>
           <Pressable style={styles.nativeUpload} onPress={handleUpload} disabled={scanState === "scanning"}>
@@ -454,7 +451,6 @@ function NativeScannerScreen() {
     startPulse();
     try {
       const result = await identifyCard(uri, filtersRef.current);
-
       if (result.type === "variants") {
         setVariantCards(result.cards);
         setShowVariantPicker(true);
@@ -463,7 +459,6 @@ function NativeScannerScreen() {
         inflightRef.current = false;
         return;
       }
-
       const card = result.card;
       if (auto && typeof card.confidence === "number" && card.confidence < CONFIDENCE_THRESHOLD) {
         backoffUntilRef.current = Date.now() + AUTO_SCAN_BACKOFF_MS;
@@ -517,7 +512,6 @@ function NativeScannerScreen() {
       if (!frameLayoutRef.current) return;
 
       inflightRef.current = true;
-
       try {
         const photo = await (cameraRef.current as any).takePictureAsync({
           quality: 0.9,
@@ -527,12 +521,10 @@ function NativeScannerScreen() {
           console.warn("[auto-scan] takePictureAsync failed:", err);
           return null;
         });
-
         if (!photo?.uri || !photo?.width || !photo?.height) {
           inflightRef.current = false;
           return;
         }
-
         const cropped = await cropToFrame(photo.uri, photo.width, photo.height, frameLayoutRef.current);
         await runIdentify(cropped, true);
       } catch (err) {
@@ -540,7 +532,6 @@ function NativeScannerScreen() {
         inflightRef.current = false;
       }
     }, AUTO_SCAN_INTERVAL_MS);
-
     return () => clearInterval(interval);
   }, [runIdentify]);
 
@@ -633,7 +624,6 @@ function NativeScannerScreen() {
         </View>
       </View>
 
-      {/* Active filter pills — shown on camera view */}
       {filterCount > 0 && (
         <View style={[styles.nativeFilterPills, { top: insets.top + 64 }]}>
           <ActiveFilterPills
@@ -707,7 +697,7 @@ function NativeScannerScreen() {
   );
 }
 
-// ─── Active filter pills (shared web+native) ──────────────────────────────────
+// ─── Active filter pills ──────────────────────────────────────────────────────
 function ActiveFilterPills({
   filters,
   colors,
@@ -755,9 +745,6 @@ export default function ScannerScreen() {
   if (Platform.OS === "web") return <WebScannerScreen />;
   return <NativeScannerScreen />;
 }
-
-const FRAME_W = 300;
-const FRAME_H = 420;
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
