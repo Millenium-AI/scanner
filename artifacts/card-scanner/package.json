@@ -4,6 +4,7 @@
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
+    "postinstall": "node scripts/copy-fonts.js",
     "dev": "pnpm exec expo start --clear",
     "build": "node scripts/build.js",
     "build:web": "pnpm exec expo export --platform web --output-dir dist && node scripts/inject-pwa.js",

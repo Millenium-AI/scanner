@@ -9,39 +9,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
-import { Platform } from "react-native";
+
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { ScanProvider } from "@/context/ScanContext";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
-import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { ScanProvider } from "@/context/ScanContext";
-
 SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
-
-// On web, @expo/vector-icons uses CSS @font-face — useFonts() won't wire it up.
-// We inject the rule manually so Ionicons glyphs resolve on first render.
-function useIoniconsFontWeb() {
-  useEffect(() => {
-    if (Platform.OS !== "web") return;
-    if (document.getElementById("ionicons-font-face")) return;
-    const style = document.createElement("style");
-    style.id = "ionicons-font-face";
-    // The .ttf is served by Expo's web bundler from node_modules automatically
-    style.textContent = `
-      @font-face {
-        font-family: 'Ionicons';
-        src: url('./assets/fonts/Ionicons.ttf') format('truetype'),
-             url('../assets/fonts/Ionicons.ttf') format('truetype');
-        font-weight: normal;
-        font-style: normal;
-      }
-    `;
-    document.head.appendChild(style);
-  }, []);
-}
 
 function RootLayoutNav() {
   return (
@@ -52,13 +29,25 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
-  useIoniconsFontWeb();
-
+  /**
+   * WHY WE LOAD IONICONS HERE
+   * --------------------------
+   * @expo/vector-icons v14+ (SDK 50+) dropped automatic font registration on
+   * Metro web. The font must be explicitly included in the Metro asset graph by
+   * require()-ing the .ttf file. We copy Ionicons.ttf into assets/fonts/ via
+   * `scripts/copy-fonts.js` (also runs as postinstall), then load it here.
+   *
+   * Using the font-family name 'Ionicons' is critical — it must match the name
+   * that @expo/vector-icons uses internally when it calls createIconSet().
+   */
   const [fontsLoaded, fontError] = useFonts({
     Poppins_400Regular,
     Poppins_500Medium,
     Poppins_600SemiBold,
     Poppins_700Bold,
+    // Ionicons loaded from local asset so Metro bundles the TTF on web.
+    // The key 'Ionicons' MUST match what @expo/vector-icons registers internally.
+    Ionicons: require("../assets/fonts/Ionicons.ttf"),
   });
 
   useEffect(() => {
