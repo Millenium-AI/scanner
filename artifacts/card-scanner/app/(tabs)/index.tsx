@@ -27,6 +27,10 @@ import {
 import { CardScanResult, useScanContext } from "@/context/ScanContext";
 import { useColors } from "@/hooks/useColors";
 import { identifyCard } from "@/services/cardScanService";
+import WebCameraScanner, {
+  WebCameraScannerHandle,
+} from "@/components/WebCameraScanner";
+import { useAutoScanWeb } from "@/hooks/useAutoScanWeb";
 
 let CameraView: React.ComponentType<{
   ref?: React.Ref<unknown>;
@@ -156,6 +160,8 @@ function ListDropdown({ colors, onClose }: { colors: any; onClose: () => void })
 // ─── Web version ─────────────────────────────────────────────────────────────
 function WebScannerScreen() {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const cameraRef = useRef<WebCameraScannerHandle | null>(null);
   const [scanState, setScanState] = useState<ScanState>("idle");
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [resultCard, setResultCard] = useState<CardScanResult | null>(null);
@@ -165,31 +171,78 @@ function WebScannerScreen() {
   const [filters, setFilters] = useState<ScanFilters>(EMPTY_FILTERS);
   const [variantCards, setVariantCards] = useState<CardScanResult[]>([]);
   const [showVariantPicker, setShowVariantPicker] = useState(false);
+  const [cameraDenied, setCameraDenied] = useState(false);
   const { lists, activeScanListId } = useScanContext();
   const activeList = lists.find((l) => l.id === activeScanListId);
-  const topPad = 67;
-  const bottomPad = 34 + 84;
   const filterCount = activeFilterCount(filters);
 
-  const runIdentify = async (uri: string) => {
-    setScanState("scanning");
-    setErrorMsg("");
-    try {
-      const result = await identifyCard(uri, filters);
-      if (result.type === "variants") {
-        setVariantCards(result.cards);
-        setShowVariantPicker(true);
-        setScanState("idle");
-        return;
+  const filtersRef = useRef<ScanFilters>(EMPTY_FILTERS);
+  useEffect(() => { filtersRef.current = filters; }, [filters]);
+
+  const backoffRef = useRef<() => void>(() => {});
+
+  // Auto-scan should pause whenever we're busy or showing a result.
+  const autoScanEnabled =
+    !cameraDenied &&
+    scanState === "idle" &&
+    !showResult &&
+    !showVariantPicker;
+
+  const runIdentify = useCallback(
+    async (uri: string, auto = false) => {
+      setScanState("scanning");
+      setErrorMsg("");
+      try {
+        const result = await identifyCard(uri, filtersRef.current);
+        if (result.type === "variants") {
+          setVariantCards(result.cards);
+          setShowVariantPicker(true);
+          setScanState("idle");
+          return;
+        }
+        const card = result.card;
+        if (
+          auto &&
+          typeof card.confidence === "number" &&
+          card.confidence < CONFIDENCE_THRESHOLD
+        ) {
+          // Low-confidence auto scan: back off and keep streaming.
+          backoffRef.current?.();
+          setScanState("idle");
+          return;
+        }
+        setResultCard(card);
+        setShowResult(true);
+        setScanState("success");
+      } catch (err: unknown) {
+        if (auto) {
+          // Don't surface auto-scan errors; just back off and retry.
+          backoffRef.current?.();
+          setScanState("idle");
+          return;
+        }
+        setErrorMsg(err instanceof Error ? err.message : "Failed to identify card");
+        setScanState("error");
       }
-      setResultCard(result.card);
-      setShowResult(true);
-      setScanState("success");
-    } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : "Failed to identify card");
-      setScanState("error");
-    }
-  };
+    },
+    []
+  );
+
+  const handleAutoCapture = useCallback(
+    (dataUri: string) => {
+      void runIdentify(dataUri, true);
+    },
+    [runIdentify]
+  );
+
+  const { triggerBackoff } = useAutoScanWeb({
+    cameraRef,
+    enabled: autoScanEnabled,
+    intervalMs: AUTO_SCAN_INTERVAL_MS,
+    backoffMs: AUTO_SCAN_BACKOFF_MS,
+    onCapture: handleAutoCapture,
+  });
+  useEffect(() => { backoffRef.current = triggerBackoff; }, [triggerBackoff]);
 
   const handleVariantSelect = (card: CardScanResult) => {
     setShowVariantPicker(false);
@@ -205,16 +258,15 @@ function WebScannerScreen() {
     setScanState("idle");
   };
 
-  const handleTakePhoto = async () => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) return;
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.85 });
-    if (!result.canceled && result.assets[0]) await runIdentify(result.assets[0].uri);
+  const handleCapture = async () => {
+    if (scanState === "scanning" || !cameraRef.current) return;
+    const dataUri = await cameraRef.current.captureFrame();
+    if (dataUri) await runIdentify(dataUri, false);
   };
 
   const handleUpload = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: "images", quality: 0.85 });
-    if (!result.canceled && result.assets[0]) await runIdentify(result.assets[0].uri);
+    if (!result.canceled && result.assets[0]) await runIdentify(result.assets[0].uri, false);
   };
 
   const handleScanAgain = () => {
@@ -225,68 +277,92 @@ function WebScannerScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
-      <View style={styles.header}>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>Scanner</Text>
-        <View style={styles.headerRight}>
-          <FilterIconButton count={filterCount} onPress={() => setShowFilters(true)} colors={colors} />
-          <Pressable
-            style={[styles.listBadge, { backgroundColor: colors.surface, borderColor: activeList?.color ?? colors.accent }]}
-            onPress={() => setShowListDrop(true)}
-          >
-            <View style={[styles.listDot, { backgroundColor: activeList?.color ?? colors.accent }]} />
-            <Text style={[styles.listBadgeText, { color: colors.foreground }]}>
-              {activeList?.name ?? "My Lists"}
+    <View style={[styles.container, { backgroundColor: "#000" }]}>
+      {/* Live camera fills the screen behind the overlay */}
+      <View style={StyleSheet.absoluteFill}>
+        {!cameraDenied ? (
+          <WebCameraScanner
+            ref={cameraRef}
+            frameWidth={SCREEN_W}
+            frameHeight={SCREEN_H}
+            accentColor={colors.accent}
+            onPermissionDenied={() => setCameraDenied(true)}
+          />
+        ) : (
+          <View style={[styles.centered, { backgroundColor: colors.background, flex: 1, paddingTop: insets.top }]}>
+            <View style={[styles.permIcon, { backgroundColor: colors.surface }]}>
+              <Ionicons name="camera-outline" size={40} color={colors.accent} />
+            </View>
+            <Text style={[styles.permTitle, { color: colors.foreground }]}>Camera Access Required</Text>
+            <Text style={[styles.permSub, { color: colors.mutedForeground }]}>
+              Allow camera access in your browser settings and reload to scan cards in real time.
             </Text>
-            <Ionicons name="chevron-down" size={12} color={colors.mutedForeground} />
+            <Pressable onPress={handleUpload} style={styles.uploadLink}>
+              <Text style={[styles.uploadLinkText, { color: colors.mutedForeground }]}>Upload a photo instead</Text>
+            </Pressable>
+          </View>
+        )}
+      </View>
+
+      {/* Header */}
+      <View style={[styles.nativeHeader, { paddingTop: insets.top + 12 }]}>
+        <Text style={styles.nativeHeaderTitle}>Scan Card</Text>
+        <View style={styles.headerRight}>
+          <FilterIconButton count={filterCount} onPress={() => setShowFilters(true)} colors={colors} dark />
+          <Pressable style={styles.listBadgeDark} onPress={() => setShowListDrop(true)}>
+            <View style={[styles.listDot, { backgroundColor: activeList?.color ?? colors.accent }]} />
+            <Text style={styles.listBadgeDarkText}>{activeList?.name ?? "My Lists"}</Text>
+            <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.6)" />
           </Pressable>
         </View>
       </View>
-      <View style={styles.scanArea}>
-        <View style={[styles.cardFrame, { borderColor: colors.border, backgroundColor: colors.card }]}>
-          <View style={[styles.corner, styles.cornerTL, { borderColor: colors.accent }]} />
-          <View style={[styles.corner, styles.cornerTR, { borderColor: colors.accent }]} />
-          <View style={[styles.corner, styles.cornerBL, { borderColor: colors.accent }]} />
-          <View style={[styles.corner, styles.cornerBR, { borderColor: colors.accent }]} />
-          {scanState === "scanning" ? (
-            <>
-              <ActivityIndicator size="large" color={colors.accent} />
-              <Text style={[styles.frameHint, { color: colors.mutedForeground }]}>Identifying Card</Text>
-            </>
-          ) : (
-            <>
-              <View style={[styles.cameraIcon, { backgroundColor: colors.surface }]}>
-                <Ionicons name="camera" size={32} color={colors.accent} />
-              </View>
-              <Text style={[styles.frameHint, { color: colors.mutedForeground }]}>
-                {scanState === "error" ? errorMsg : "Position card in frame"}
-              </Text>
-            </>
-          )}
+
+      {filterCount > 0 && !cameraDenied && (
+        <View style={[styles.nativeFilterPills, { top: insets.top + 64 }]}>
+          <ActiveFilterPills
+            filters={filters}
+            colors={colors}
+            dark
+            onClear={(key) => setFilters(f => ({ ...f, [key]: null }))}
+          />
         </View>
-      </View>
-      {/* Active filter pills */}
-      {filterCount > 0 && (
-        <ActiveFilterPills filters={filters} colors={colors} onClear={(key) => setFilters(f => ({ ...f, [key]: null }))} />
       )}
-      <View style={[styles.actions, { paddingBottom: bottomPad }]}>
-        <Pressable
-          style={({ pressed }) => [styles.captureBtn, { backgroundColor: colors.accent, opacity: pressed || scanState === "scanning" ? 0.8 : 1 }]}
-          onPress={handleTakePhoto}
-          disabled={scanState === "scanning"}
-        >
-          <Ionicons name="camera" size={22} color={colors.background} />
-          <Text style={[styles.captureBtnText, { color: colors.background }]}>Take Photo</Text>
-        </Pressable>
-        <Pressable
-          style={({ pressed }) => [styles.uploadBtn, { borderColor: colors.border, backgroundColor: colors.card, opacity: pressed ? 0.7 : 1 }]}
-          onPress={handleUpload}
-          disabled={scanState === "scanning"}
-        >
-          <Ionicons name="image-outline" size={18} color={colors.mutedForeground} />
-          <Text style={[styles.uploadBtnText, { color: colors.mutedForeground }]}>Upload Photo</Text>
-        </Pressable>
-      </View>
+
+      {/* Centered hint */}
+      {!cameraDenied && (
+        <View style={styles.frameOverlay} pointerEvents="none">
+          <Text style={styles.nativeHint}>
+            {scanState === "scanning" ? "Identifying" :
+              scanState === "error" ? errorMsg :
+              "Hold card steady \u2014 scanning automatically"}
+          </Text>
+        </View>
+      )}
+
+      {/* Bottom controls */}
+      {!cameraDenied && (
+        <View style={[styles.nativeBottom, { paddingBottom: insets.bottom + 90 }]}>
+          <Pressable style={styles.nativeUpload} onPress={handleUpload} disabled={scanState === "scanning"}>
+            <Ionicons name="image-outline" size={22} color="rgba(255,255,255,0.7)" />
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.nativeCapture, { opacity: pressed || scanState === "scanning" ? 0.8 : 1 }]}
+            onPress={handleCapture}
+            disabled={scanState === "scanning"}
+          >
+            <View style={[styles.nativeCaptureRing, { borderColor: colors.accent }]}>
+              <View style={[styles.nativeCaptureCore, { backgroundColor: colors.accent }]}>
+                {scanState === "scanning"
+                  ? <ActivityIndicator color={colors.background} size="small" />
+                  : <Ionicons name="scan" size={26} color={colors.background} />
+                }
+              </View>
+            </View>
+          </Pressable>
+          <View style={styles.nativeUpload} />
+        </View>
+      )}
+
       {showListDrop && <ListDropdown colors={colors} onClose={() => setShowListDrop(false)} />}
       <ScanFilterSheet
         visible={showFilters}

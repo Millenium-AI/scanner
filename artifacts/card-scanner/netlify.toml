@@ -1,0 +1,62 @@
+# Netlify deploy config for the CardScan PWA (Expo web export).
+#
+# Build:    pnpm run build:web   (expo export -> dist/, then PWA head injection)
+# Publish:  dist/
+#
+# Notes:
+#  • base is set to this package so Netlify runs the build from here even though
+#    the repo is a pnpm monorepo. Netlify installs from the repo root lockfile.
+#  • getUserMedia requires HTTPS — Netlify serves HTTPS by default.
+
+[build]
+  base    = "artifacts/card-scanner"
+  command = "pnpm run build:web"
+  publish = "dist"
+
+[build.environment]
+  # Expo web export targets Node; pin a modern Node for the Netlify builder.
+  NODE_VERSION = "20"
+  # The card-identify backend the app talks to. Override in the Netlify UI
+  # (Site settings -> Environment variables) with your real HTTPS endpoint.
+  # Must be HTTPS in production or the browser will block the mixed-content fetch.
+  EXPO_PUBLIC_BACKEND_URL = "https://your-backend.example.com"
+
+# ── Headers ────────────────────────────────────────────────────────────────
+
+# Allow this origin (and itself) to use the camera in standalone PWA mode.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Permissions-Policy = "camera=(self), microphone=()"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Service worker must be served fresh and be allowed to control the whole scope.
+[[headers]]
+  for = "/service-worker.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    Service-Worker-Allowed = "/"
+
+# Manifest fresh-ish so install metadata updates land.
+[[headers]]
+  for = "/manifest.json"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+    Content-Type = "application/manifest+json"
+
+# Long-cache the fingerprinted Expo static bundle/assets.
+[[headers]]
+  for = "/_expo/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# ── Redirects ────────────────────────────────────────────────────────────────
+
+# SPA fallback: every unknown path serves index.html so client-side routing
+# (expo-router) handles it. Real files (manifest, sw, icons, _expo, assets)
+# are served directly because they exist on disk and take precedence.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
