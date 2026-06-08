@@ -53,12 +53,16 @@ type ScanState = "idle" | "scanning" | "success" | "error";
 const SCREEN_W = Dimensions.get("window").width;
 const SCREEN_H = Dimensions.get("window").height;
 
-const FRAME_W = 300;
-const FRAME_H = 420;
-// Positive = shift frame down from center, negative = up
-const FRAME_OFFSET_Y = 20;
+const FRAME_W = SCREEN_W * 0.82;
+const FRAME_H = FRAME_W * 1.4; // trading card aspect ratio ~1:1.4
 
+// Header height (title bar) + tab bar height used for centering the frame
+const HEADER_H = 88; // safe-area top + title row
 const TAB_BAR_H = 49;
+
+// On web/PWA, CSS env(safe-area-inset-top) isn't always picked up by
+// react-native-safe-area-context. We use a sensible fallback.
+const WEB_STATUS_BAR_H = 44;
 
 async function cropToFrame(
   photoUri: string,
@@ -180,7 +184,14 @@ function WebScannerScreen() {
   const filterCount = activeFilterCount(filters);
   const filtersRef = useRef<ScanFilters>(EMPTY_FILTERS);
 
+  // On web PWA, insets.top may be 0 — use CSS env() fallback via a minimum
+  const topInset = Math.max(insets.top, WEB_STATUS_BAR_H);
+  const headerH = topInset + 52; // status bar + title row
   const bottomPad = insets.bottom + TAB_BAR_H + 16;
+
+  // Vertically center the frame in the usable viewport between header and bottom controls
+  const usableH = SCREEN_H - headerH - (bottomPad + 80);
+  const frameTop = headerH + (usableH - FRAME_H) / 2;
 
   const runIdentify = useCallback(async (uri: string) => {
     setScanState("scanning"); setErrorMsg("");
@@ -219,12 +230,12 @@ function WebScannerScreen() {
             ref={cameraRef}
             frameWidth={FRAME_W}
             frameHeight={FRAME_H}
-            frameOffsetY={FRAME_OFFSET_Y}
+            frameOffsetY={frameTop - SCREEN_H / 2 + FRAME_H / 2}
             accentColor={colors.accent}
             onPermissionDenied={() => setCameraDenied(true)}
           />
         ) : (
-          <View style={[styles.centered, { backgroundColor: colors.background, flex: 1, paddingTop: insets.top }]}>
+          <View style={[styles.centered, { backgroundColor: colors.background, flex: 1, paddingTop: topInset }]}>
             <View style={[styles.permIcon, { backgroundColor: colors.surface }]}>
               <Ionicons name="camera-outline" size={40} color={colors.accent} />
             </View>
@@ -237,7 +248,8 @@ function WebScannerScreen() {
         )}
       </View>
 
-      <View style={[styles.nativeHeader, { paddingTop: insets.top + 12 }]}>
+      {/* Header — sits above camera, safe area aware */}
+      <View style={[styles.nativeHeader, { paddingTop: topInset + 8 }]}>
         <Text style={styles.nativeHeaderTitle}>Scan Card</Text>
         <View style={styles.headerRight}>
           <FilterIconButton count={filterCount} onPress={() => setShowFilters(true)} colors={colors} dark />
@@ -250,13 +262,29 @@ function WebScannerScreen() {
       </View>
 
       {filterCount > 0 && !cameraDenied && (
-        <View style={[styles.nativeFilterPills, { top: insets.top + 64 }]}>
+        <View style={[styles.nativeFilterPills, { top: topInset + 60 }]}>
           <ActiveFilterPills filters={filters} colors={colors} dark onClear={(key) => setFilters(f => ({ ...f, [key]: null }))} />
         </View>
       )}
 
+      {/* Scan frame corners — absolutely positioned to calculated center */}
       {!cameraDenied && (
-        <View style={[styles.hintRow, { bottom: bottomPad + 100 }]}>
+        <View
+          pointerEvents="none"
+          style={[
+            styles.scanBox,
+            { top: frameTop, left: (SCREEN_W - FRAME_W) / 2 },
+          ]}
+        >
+          <View style={[styles.corner, styles.cornerTL, { borderColor: colors.accent }]} />
+          <View style={[styles.corner, styles.cornerTR, { borderColor: colors.accent }]} />
+          <View style={[styles.corner, styles.cornerBL, { borderColor: colors.accent }]} />
+          <View style={[styles.corner, styles.cornerBR, { borderColor: colors.accent }]} />
+        </View>
+      )}
+
+      {!cameraDenied && (
+        <View style={[styles.hintRow, { top: frameTop + FRAME_H + 16 }]}>
           <Text style={styles.nativeHint}>
             {scanState === "scanning" ? "Identifying…" : scanState === "error" ? errorMsg : "Tap the button to scan"}
           </Text>
@@ -410,7 +438,7 @@ function NativeScannerScreen() {
         </View>
       )}
 
-      <View style={[styles.nativeHeader, { paddingTop: insets.top + 12 }]}>
+      <View style={[styles.nativeHeader, { paddingTop: insets.top + 8 }]}>
         <Text style={styles.nativeHeaderTitle}>Scan Card</Text>
         <View style={styles.headerRight}>
           <FilterIconButton count={filterCount} onPress={() => setShowFilters(true)} colors={colors} dark />
@@ -423,12 +451,12 @@ function NativeScannerScreen() {
       </View>
 
       {filterCount > 0 && (
-        <View style={[styles.nativeFilterPills, { top: insets.top + 64 }]}>
+        <View style={[styles.nativeFilterPills, { top: insets.top + 60 }]}>
           <ActiveFilterPills filters={filters} colors={colors} dark onClear={(key) => setFilters(f => ({ ...f, [key]: null }))} />
         </View>
       )}
 
-      <View style={[styles.frameOverlay, { marginTop: FRAME_OFFSET_Y }]} pointerEvents="none">
+      <View style={[styles.frameOverlay, { marginTop: 0 }]} pointerEvents="none">
         <View style={styles.scanBox} onLayout={handleFrameLayout}>
           <View style={[styles.corner, styles.cornerTL, { borderColor: colors.accent }]} />
           <View style={[styles.corner, styles.cornerTR, { borderColor: colors.accent }]} />
@@ -479,19 +507,25 @@ const styles = StyleSheet.create({
   headerRight: { flexDirection: "row", alignItems: "center", gap: 10 },
   listDot: { width: 8, height: 8, borderRadius: 4 },
   dimRegion: { position: "absolute", backgroundColor: "rgba(0,0,0,0.55)" },
-  nativeHeader: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 12, zIndex: 10 },
+  nativeHeader: {
+    position: "absolute", top: 0, left: 0, right: 0,
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 20, paddingBottom: 12, zIndex: 10,
+  },
   nativeHeaderTitle: { color: "#fff", fontSize: 22, fontFamily: "Poppins_700Bold" },
   listBadgeDark: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.12)" },
   listBadgeDarkText: { color: "rgba(255,255,255,0.9)", fontSize: 12, fontFamily: "Poppins_600SemiBold" },
+  // Native: frame centered using flexbox in absolute fill
   frameOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 20, pointerEvents: "none" as "none" },
+  // Web: frame absolutely positioned via computed top/left
   scanBox: { width: FRAME_W, height: FRAME_H, position: "relative" },
   hintRow: { position: "absolute", left: 0, right: 0, alignItems: "center" },
   nativeHint: { color: "rgba(255,255,255,0.85)", fontSize: 13, fontFamily: "Poppins_400Regular", textAlign: "center", paddingHorizontal: 40 },
-  corner: { position: "absolute", width: 26, height: 26, borderWidth: 3 },
-  cornerTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 6 },
-  cornerTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 6 },
-  cornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 6 },
-  cornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 6 },
+  corner: { position: "absolute", width: 28, height: 28, borderWidth: 3 },
+  cornerTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 8 },
+  cornerTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 8 },
+  cornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 8 },
+  cornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 8 },
   nativeBottom: { position: "absolute", bottom: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingHorizontal: 40 },
   nativeUpload: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
   nativeCapture: { alignItems: "center", justifyContent: "center" },
