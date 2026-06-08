@@ -55,6 +55,7 @@
     "zod-validation-error": "^3.4.0"
   },
   "dependencies": {
-    "@expo-google-fonts/poppins": "^0.4.1"
+    "@expo-google-fonts/poppins": "^0.4.1",
+    "lucide-react-native": "^1.17.0"
   }
 }
