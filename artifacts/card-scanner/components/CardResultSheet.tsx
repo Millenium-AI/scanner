@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as WebBrowser from "expo-web-browser";
@@ -20,6 +19,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { Icon } from "@/components/Icon";
 import { CardScanResult, LIST_COLORS, useScanContext } from "@/context/ScanContext";
 import { useColors } from "@/hooks/useColors";
 
@@ -100,14 +100,12 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
   const activeList = lists.find((l) => l.id === activeScanListId);
   const activeListName = activeList?.name ?? "My Scans";
 
-  // Extra fields from server (not in CardScanResult type, but passed through via JSON)
   const r = result as any;
   const tcgUrl: string | undefined = r.tcg_url;
   const ebayUrl: string | undefined = r.ebay_url;
   const cm7: number | undefined = r.cardmarket_avg7;
   const cmTrend: number | undefined = r.cardmarket_trend;
 
-  // Determine image source with content type hint for TCGdex WebP URLs
   const imageSource = result.imageUrl
     ? result.imageUrl.includes("assets.tcgdex.net")
       ? { uri: result.imageUrl, headers: { Accept: "image/webp,image/*" } }
@@ -159,7 +157,6 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
         <Animated.View
           style={[styles.sheet, { backgroundColor: colors.card, paddingBottom: insets.bottom + 20 }, { transform: [{ translateY }] }]}
         >
-          {/* Drag handle + close */}
           <View style={styles.headerRow}>
             <View {...panResponder.panHandlers} style={styles.dragHandleTouch}>
               <View style={styles.dragHandle}>
@@ -167,7 +164,7 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
               </View>
             </View>
             <Pressable onPress={() => showCreateList ? handleCancelCreateList() : onClose()} style={styles.closeButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Ionicons name="close" size={20} color={colors.mutedForeground} />
+              <Icon name="close" size={20} color={colors.mutedForeground} />
             </Pressable>
           </View>
 
@@ -199,14 +196,12 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
                 <Text style={[styles.createBtnText, { color: newListName.trim() ? colors.background : colors.mutedForeground }]}>Create &amp; Add Card</Text>
               </Pressable>
               <Pressable style={[styles.btn, styles.btnGhost, { borderColor: colors.border, marginTop: 12 }]} onPress={handleCancelCreateList}>
-                <Ionicons name="close-circle-outline" size={18} color={colors.mutedForeground} />
+                <Icon name="close-circle-outline" size={18} color={colors.mutedForeground} />
                 <Text style={[styles.btnText, { color: colors.mutedForeground }]}>Cancel</Text>
               </Pressable>
             </ScrollView>
           ) : (
             <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
-
-              {/* Card image */}
               {imageSource ? (
                 <View style={styles.imageWrapper}>
                   <Image
@@ -219,11 +214,10 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
                 </View>
               ) : (
                 <View style={[styles.imagePlaceholder, { backgroundColor: colors.surface }]}>
-                  <Ionicons name="image-outline" size={40} color={colors.mutedForeground} />
+                  <Icon name="image-outline" size={40} color={colors.mutedForeground} />
                 </View>
               )}
 
-              {/* Game badge + confidence */}
               <View style={styles.badges}>
                 <View style={[styles.gameBadge, { backgroundColor: gc + "20", borderColor: gc + "50", borderWidth: 1 }]}>
                   <Text style={[styles.gameBadgeText, { color: gc }]}>{result.game.toUpperCase()}</Text>
@@ -237,7 +231,6 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
                 </View>
               </View>
 
-              {/* Name + set line — identical format for both sources */}
               <Text style={[styles.cardName, { color: colors.foreground }]}>{result.name}</Text>
               <Text style={[styles.setLine, { color: colors.mutedForeground }]}>
                 {result.set}
@@ -245,7 +238,6 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
                 {result.rarity ? ` · ${result.rarity}` : ""}
               </Text>
 
-              {/* Market price card */}
               {result.marketValue !== undefined && (
                 <View style={[styles.marketCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                   <View style={styles.marketMainRow}>
@@ -253,14 +245,12 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
                       <Text style={[styles.marketLabel, { color: colors.mutedForeground }]}>MARKET PRICE</Text>
                       <Text style={[styles.marketValue, { color: colors.accent }]}>{fmt(result.marketValue)}</Text>
                     </View>
-                    {/* Cardmarket 7-day avg when available (TCGdex only) */}
                     {cm7 !== undefined && (
                       <View style={styles.marketRight}>
                         <Text style={[styles.marketLabel, { color: colors.mutedForeground }]}>CM 7-DAY</Text>
                         <Text style={[styles.cmValue, { color: colors.foreground }]}>{fmt(cm7)}</Text>
                       </View>
                     )}
-                    {/* Cardmarket trend when cm7 not available */}
                     {cm7 === undefined && cmTrend !== undefined && (
                       <View style={styles.marketRight}>
                         <Text style={[styles.marketLabel, { color: colors.mutedForeground }]}>CM TREND</Text>
@@ -271,49 +261,47 @@ export function CardResultSheet({ visible, result, onClose, onScanAgain }: CardR
                 </View>
               )}
 
-              {/* Marketplace links — same row layout for both sources */}
               {(tcgUrl || ebayUrl) && (
                 <View style={styles.linksRow}>
                   {tcgUrl && (
                     <Pressable style={[styles.linkBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => openLink(tcgUrl)}>
-                      <Ionicons name="pricetag-outline" size={15} color={colors.accent} />
+                      <Icon name="pricetag-outline" size={15} color={colors.accent} />
                       <Text style={[styles.linkBtnText, { color: colors.accent }]}>TCGplayer</Text>
-                      <Ionicons name="open-outline" size={13} color={colors.accent} />
+                      <Icon name="open-outline" size={13} color={colors.accent} />
                     </Pressable>
                   )}
                   {ebayUrl && (
                     <Pressable style={[styles.linkBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => openLink(ebayUrl)}>
-                      <Ionicons name="storefront-outline" size={15} color="#e43137" />
+                      <Icon name="storefront-outline" size={15} color="#e43137" />
                       <Text style={[styles.linkBtnText, { color: "#e43137" }]}>eBay Sold</Text>
-                      <Ionicons name="open-outline" size={13} color="#e43137" />
+                      <Icon name="open-outline" size={13} color="#e43137" />
                     </Pressable>
                   )}
                 </View>
               )}
 
-              {/* Action buttons */}
               <View style={styles.actions}>
                 <Pressable style={[styles.btn, styles.btnGhost, { borderColor: colors.border }]} onPress={onScanAgain}>
-                  <Ionicons name="scan" size={18} color={colors.mutedForeground} />
+                  <Icon name="scan" size={18} color={colors.mutedForeground} />
                   <Text style={[styles.btnText, { color: colors.mutedForeground }]}>Scan Again</Text>
                 </Pressable>
 
                 <View style={styles.listBtnRow}>
                   <Pressable style={[styles.btn, styles.btnSecondary, styles.btnFlex, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={handleSave}>
-                    <Ionicons name="bookmark-outline" size={16} color={colors.foreground} />
+                    <Icon name="bookmark-outline" size={16} color={colors.foreground} />
                     <Text style={[styles.btnTextSm, { color: colors.foreground }]} numberOfLines={1}>Add to {activeListName}</Text>
                   </Pressable>
                   <Pressable
                     style={[styles.btn, styles.btnSecondary, styles.btnCreate, { backgroundColor: colors.surface, borderColor: colors.border }]}
                     onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowCreateList(true); }}
                   >
-                    <Ionicons name="add-circle-outline" size={16} color={colors.mutedForeground} />
+                    <Icon name="add-circle-outline" size={16} color={colors.mutedForeground} />
                     <Text style={[styles.btnTextSm, { color: colors.mutedForeground }]}>New List</Text>
                   </Pressable>
                 </View>
 
                 <Pressable style={[styles.btn, styles.btnPrimary, { backgroundColor: colors.accent }]} onPress={handleCollection}>
-                  <Ionicons name="albums" size={18} color={colors.background} />
+                  <Icon name="albums" size={18} color={colors.background} />
                   <Text style={[styles.btnText, { color: colors.background }]}>Add to Collection</Text>
                 </Pressable>
               </View>
@@ -336,31 +324,25 @@ const styles = StyleSheet.create({
   sheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, maxHeight: "92%" },
   sheetTitle: { fontSize: 20, fontFamily: "Poppins_700Bold", marginBottom: 8 },
   sheetSub: { fontSize: 13, fontFamily: "Poppins_400Regular", marginBottom: 20, lineHeight: 20 },
-
   imageWrapper: { alignSelf: "center", width: 160, height: 224, marginBottom: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 12, elevation: 8 },
   cardImage: { width: "100%", height: "100%", borderRadius: 10 },
   imagePlaceholder: { alignSelf: "center", width: 160, height: 224, borderRadius: 10, marginBottom: 16, alignItems: "center", justifyContent: "center" },
-
   badges: { flexDirection: "row", gap: 8, marginBottom: 10, flexWrap: "wrap" },
   gameBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
   gameBadgeText: { fontSize: 11, fontFamily: "Poppins_700Bold", letterSpacing: 0.5 },
   confBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
   confText: { fontSize: 11, fontFamily: "Poppins_600SemiBold" },
-
   cardName: { fontSize: 22, fontFamily: "Poppins_700Bold", marginBottom: 4 },
   setLine: { fontSize: 13, fontFamily: "Poppins_400Regular", marginBottom: 14 },
-
   marketCard: { borderRadius: 16, borderWidth: 1, marginBottom: 12, paddingVertical: 14, paddingHorizontal: 18 },
   marketMainRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   marketLabel: { fontSize: 10, fontFamily: "Poppins_500Medium", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 2 },
   marketValue: { fontSize: 28, fontFamily: "Poppins_700Bold" },
   marketRight: { alignItems: "flex-end" },
   cmValue: { fontSize: 15, fontFamily: "Poppins_600SemiBold" },
-
   linksRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
   linkBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 11, borderRadius: 12, borderWidth: 1 },
   linkBtnText: { fontSize: 13, fontFamily: "Poppins_600SemiBold" },
-
   actions: { gap: 10, marginTop: 4, paddingBottom: 8 },
   listBtnRow: { flexDirection: "row", gap: 8 },
   btn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 15, borderRadius: 14, gap: 8 },
@@ -371,7 +353,6 @@ const styles = StyleSheet.create({
   btnGhost: { borderWidth: 1 },
   btnText: { fontSize: 15, fontFamily: "Poppins_600SemiBold" },
   btnTextSm: { fontSize: 13, fontFamily: "Poppins_600SemiBold" },
-
   input: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 16, paddingVertical: 12, fontSize: 15, fontFamily: "Poppins_400Regular", marginBottom: 20 },
   colorLabel: { fontSize: 11, fontFamily: "Poppins_500Medium", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 12 },
   colorRow: { flexDirection: "row", gap: 10, flexWrap: "wrap", marginBottom: 24 },

@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useMemo, useState } from "react";
 import {
@@ -16,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CardDetailModal } from "@/components/CardDetailModal";
 import { CardListItem } from "@/components/CardListItem";
+import { Icon } from "@/components/Icon";
 import { LIST_COLORS, ScanItem, ScanList, useScanContext } from "@/context/ScanContext";
 import { useColors } from "@/hooks/useColors";
 
@@ -65,9 +65,7 @@ function TradeCalculator({ totalValue, colors }: { totalValue: number; colors: a
               ]}
               onPress={() => handlePreset(pct)}
             >
-              <Text style={[calcStyles.pctBtnText, { color: activePreset === pct ? colors.background : colors.mutedForeground }]}>
-                {pct}%
-              </Text>
+              <Text style={[calcStyles.pctBtnText, { color: activePreset === pct ? colors.background : colors.mutedForeground }]}>{pct}%</Text>
             </Pressable>
           ))}
           <Pressable
@@ -79,7 +77,7 @@ function TradeCalculator({ totalValue, colors }: { totalValue: number; colors: a
             onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setCustomModalVisible(true); }}
           >
             <Text style={[calcStyles.pctBtnText, { color: activePreset === -1 ? colors.background : colors.mutedForeground }]}>
-              {activePreset === -1 && customPct !== null ? `${customPct}%` : "\u00b7\u00b7\u00b7"}
+              {activePreset === -1 && customPct !== null ? `${customPct}%` : "···"}
             </Text>
           </Pressable>
         </View>
@@ -144,12 +142,7 @@ export default function ScansScreen() {
     return filteredScans.reduce((sum, s) => sum + (s.card.marketValue ?? 0), 0);
   }, [filteredScans]);
 
-  const handleSelectList = (id: string) => {
-    setSelectedListId(id);
-    setActiveScanListId(id);
-    setShowDropdown(false);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  };
+  const handleSelectList = (id: string) => { setSelectedListId(id); setActiveScanListId(id); setShowDropdown(false); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); };
 
   const handleCreateList = () => {
     if (!newListName.trim()) return;
@@ -164,23 +157,18 @@ export default function ScansScreen() {
 
   const handleDeleteList = (list: ScanList) => {
     if (list.id === "default") return;
-    Alert.alert(
-      "Delete List",
-      `Delete \"${list.name}\" and all its scans?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            deleteList(list.id);
-            if (selectedListId === list.id) setSelectedListId(lists[0]?.id ?? "default");
-            setShowDropdown(false);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-          },
+    Alert.alert("Delete List", `Delete "${list.name}" and all its scans?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete", style: "destructive",
+        onPress: () => {
+          deleteList(list.id);
+          if (selectedListId === list.id) setSelectedListId(lists[0]?.id ?? "default");
+          setShowDropdown(false);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const handleDeleteScan = (id: string) => {
@@ -197,38 +185,30 @@ export default function ScansScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
-      {/* Header */}
       <View style={styles.headerRow}>
         <Text style={[styles.title, { color: colors.foreground }]}>Lists</Text>
         <Pressable style={[styles.newBtn, { backgroundColor: colors.accent }]} onPress={() => setShowNewList(true)}>
-          <Ionicons name="add" size={20} color={colors.background} />
+          <Icon name="add" size={20} color={colors.background} />
           <Text style={[styles.newBtnText, { color: colors.background }]}>New List</Text>
         </Pressable>
       </View>
 
-      {/* Trade Calculator */}
       <View style={styles.calcWrapper}>
         <TradeCalculator totalValue={listTotalValue} colors={colors} />
       </View>
 
-      {/* List Dropdown */}
       <View style={styles.dropdownWrapper}>
         <Pressable
           style={[styles.dropdownTrigger, { backgroundColor: colors.card, borderColor: selectedList?.color ?? colors.accent }]}
           onPress={() => setShowDropdown(true)}
         >
           <View style={[styles.dropdownDot, { backgroundColor: selectedList?.color ?? colors.accent }]} />
-          <Text style={[styles.dropdownLabel, { color: colors.foreground }]} numberOfLines={1}>
-            {selectedList?.name ?? "Select list"}
-          </Text>
-          <Text style={[styles.dropdownCount, { color: colors.mutedForeground }]}>
-            {filteredScans.length} card{filteredScans.length !== 1 ? "s" : ""}
-          </Text>
-          <Ionicons name="chevron-down" size={16} color={colors.mutedForeground} />
+          <Text style={[styles.dropdownLabel, { color: colors.foreground }]} numberOfLines={1}>{selectedList?.name ?? "Select list"}</Text>
+          <Text style={[styles.dropdownCount, { color: colors.mutedForeground }]}>{filteredScans.length} card{filteredScans.length !== 1 ? "s" : ""}</Text>
+          <Icon name="chevron-down" size={16} color={colors.mutedForeground} />
         </Pressable>
       </View>
 
-      {/* Scan list */}
       <FlatList
         data={filteredScans}
         keyExtractor={(item) => item.id}
@@ -238,7 +218,7 @@ export default function ScansScreen() {
         ListEmptyComponent={
           <View style={styles.empty}>
             <View style={[styles.emptyIcon, { backgroundColor: colors.card }]}>
-              <Ionicons name="scan-outline" size={36} color={colors.mutedForeground} />
+              <Icon name="scan-outline" size={36} color={colors.mutedForeground} />
             </View>
             <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No scans in this list</Text>
             <Text style={[styles.emptySub, { color: colors.mutedForeground }]}>Scan a card and add it to this list</Text>
@@ -254,7 +234,6 @@ export default function ScansScreen() {
         )}
       />
 
-      {/* ── Dropdown modal ── */}
       <Modal visible={showDropdown} transparent animationType="fade" onRequestClose={() => setShowDropdown(false)}>
         <Pressable style={styles.dropOverlay} onPress={() => setShowDropdown(false)}>
           <Pressable onPress={() => {}} style={[styles.dropMenu, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -263,24 +242,14 @@ export default function ScansScreen() {
               const count = scans.filter((s) => s.listId === list.id).length;
               const active = selectedListId === list.id;
               return (
-                <Pressable
-                  key={list.id}
-                  style={[styles.dropItem, active && { backgroundColor: colors.surface }]}
-                  onPress={() => handleSelectList(list.id)}
-                >
+                <Pressable key={list.id} style={[styles.dropItem, active && { backgroundColor: colors.surface }]} onPress={() => handleSelectList(list.id)}>
                   <View style={[styles.dropDot, { backgroundColor: list.color }]} />
-                  <Text style={[styles.dropItemText, { color: active ? colors.foreground : colors.mutedForeground }]}>
-                    {list.name}
-                  </Text>
+                  <Text style={[styles.dropItemText, { color: active ? colors.foreground : colors.mutedForeground }]}>{list.name}</Text>
                   <Text style={[styles.dropItemCount, { color: colors.mutedForeground }]}>{count}</Text>
-                  {active && <Ionicons name="checkmark" size={16} color={colors.accent} style={{ marginRight: 4 }} />}
+                  {active && <Icon name="checkmark" size={16} color={colors.accent} />}
                   {list.id !== "default" && (
-                    <Pressable
-                      hitSlop={12}
-                      onPress={() => handleDeleteList(list)}
-                      style={[styles.dropDeleteBtn, { backgroundColor: colors.danger + "20" }]}
-                    >
-                      <Ionicons name="trash-outline" size={14} color={colors.danger} />
+                    <Pressable hitSlop={12} onPress={() => handleDeleteList(list)} style={[styles.dropDeleteBtn, { backgroundColor: colors.danger + "20" }]}>
+                      <Icon name="trash-outline" size={14} color={colors.danger} />
                     </Pressable>
                   )}
                 </Pressable>
@@ -290,7 +259,6 @@ export default function ScansScreen() {
         </Pressable>
       </Modal>
 
-      {/* ── New List dialog (centered modal) ── */}
       <Modal visible={showNewList} transparent animationType="fade" onRequestClose={() => setShowNewList(false)}>
         <Pressable style={styles.dialogOverlay} onPress={() => setShowNewList(false)}>
           <Pressable onPress={() => {}} style={[styles.dialogBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -308,25 +276,14 @@ export default function ScansScreen() {
             <Text style={[styles.colorLabel, { color: colors.mutedForeground }]}>Color</Text>
             <View style={styles.colorRow}>
               {LIST_COLORS.map((c) => (
-                <Pressable
-                  key={c}
-                  style={[styles.colorDot, { backgroundColor: c }, newListColor === c && styles.colorDotActive]}
-                  onPress={() => setNewListColor(c)}
-                />
+                <Pressable key={c} style={[styles.colorDot, { backgroundColor: c }, newListColor === c && styles.colorDotActive]} onPress={() => setNewListColor(c)} />
               ))}
             </View>
             <View style={styles.dialogActions}>
-              <Pressable
-                style={[styles.dialogBtn, { borderColor: colors.border, borderWidth: 1 }]}
-                onPress={() => { setShowNewList(false); setNewListName(""); setNewListColor(LIST_COLORS[0]); }}
-              >
+              <Pressable style={[styles.dialogBtn, { borderColor: colors.border, borderWidth: 1 }]} onPress={() => { setShowNewList(false); setNewListName(""); setNewListColor(LIST_COLORS[0]); }}>
                 <Text style={[styles.dialogBtnText, { color: colors.mutedForeground }]}>Cancel</Text>
               </Pressable>
-              <Pressable
-                style={[styles.dialogBtn, { backgroundColor: newListName.trim() ? colors.accent : colors.surface }]}
-                onPress={handleCreateList}
-                disabled={!newListName.trim()}
-              >
+              <Pressable style={[styles.dialogBtn, { backgroundColor: newListName.trim() ? colors.accent : colors.surface }]} onPress={handleCreateList} disabled={!newListName.trim()}>
                 <Text style={[styles.dialogBtnText, { color: newListName.trim() ? colors.background : colors.mutedForeground }]}>Create</Text>
               </Pressable>
             </View>
@@ -334,12 +291,7 @@ export default function ScansScreen() {
         </Pressable>
       </Modal>
 
-      {/* Card detail modal */}
-      <CardDetailModal
-        visible={!!selectedScan}
-        card={selectedScan?.card ?? null}
-        onClose={() => setSelectedScan(null)}
-      />
+      <CardDetailModal visible={!!selectedScan} card={selectedScan?.card ?? null} onClose={() => setSelectedScan(null)} />
     </View>
   );
 }
@@ -350,22 +302,17 @@ const styles = StyleSheet.create({
   title: { fontSize: 26, fontFamily: "Poppins_700Bold" },
   newBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
   newBtnText: { fontSize: 13, fontFamily: "Poppins_600SemiBold" },
-
   calcWrapper: { paddingHorizontal: 16, marginBottom: 14, gap: 8 },
-
   dropdownWrapper: { paddingHorizontal: 16, marginBottom: 14 },
   dropdownTrigger: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingVertical: 14, borderRadius: 14, borderWidth: 1.5 },
   dropdownDot: { width: 10, height: 10, borderRadius: 5 },
   dropdownLabel: { flex: 1, fontSize: 15, fontFamily: "Poppins_600SemiBold" },
   dropdownCount: { fontSize: 13, fontFamily: "Poppins_400Regular" },
-
   listContent: { paddingHorizontal: 16, paddingTop: 4 },
   empty: { alignItems: "center", paddingTop: 80, gap: 12 },
   emptyIcon: { width: 72, height: 72, borderRadius: 36, alignItems: "center", justifyContent: "center" },
   emptyTitle: { fontSize: 18, fontFamily: "Poppins_600SemiBold" },
   emptySub: { fontSize: 13, fontFamily: "Poppins_400Regular" },
-
-  // Dropdown
   dropOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", paddingHorizontal: 24 },
   dropMenu: { width: "100%", borderRadius: 18, borderWidth: 1, paddingVertical: 8, overflow: "hidden" },
   dropMenuTitle: { fontSize: 10, fontFamily: "Poppins_500Medium", textTransform: "uppercase", letterSpacing: 1, paddingHorizontal: 18, paddingVertical: 10 },
@@ -374,8 +321,6 @@ const styles = StyleSheet.create({
   dropItemText: { flex: 1, fontSize: 15, fontFamily: "Poppins_500Medium" },
   dropItemCount: { fontSize: 13, fontFamily: "Poppins_400Regular", marginRight: 4 },
   dropDeleteBtn: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center" },
-
-  // New List dialog
   dialogOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", paddingHorizontal: 28 },
   dialogBox: { width: "100%", borderRadius: 20, borderWidth: 1, padding: 24, gap: 0 },
   dialogTitle: { fontSize: 18, fontFamily: "Poppins_700Bold", marginBottom: 16 },

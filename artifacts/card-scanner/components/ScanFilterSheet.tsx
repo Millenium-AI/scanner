@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React from "react";
 import {
@@ -10,6 +9,8 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { Icon } from "@/components/Icon";
 import { useColors } from "@/hooks/useColors";
 
 export type ScanGame = "Pokemon" | "One Piece" | null;
@@ -33,8 +34,6 @@ export const EMPTY_FILTERS: ScanFilters = {
 export function activeFilterCount(f: ScanFilters): number {
   return [f.game, f.set, f.language, f.finish].filter(Boolean).length;
 }
-
-// ─── Hardcoded set lists ───────────────────────────────────────────────────
 
 const ONE_PIECE_SETS: { code: string; name: string }[] = [
   { code: "OP01", name: "OP01 · Romance Dawn" },
@@ -108,47 +107,16 @@ const POKEMON_SETS: { code: string; name: string }[] = [
 const OP_FINISH_OPTIONS: ScanFinish[] = ["Normal", "Foil"];
 const POKEMON_FINISH_OPTIONS: ScanFinish[] = ["Normal", "Foil", "Reverse Foil"];
 
-// ─── Chip ──────────────────────────────────────────────────────────────────
-
-function Chip({
-  label,
-  selected,
-  onPress,
-  colors,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-  colors: any;
-}) {
+function Chip({ label, selected, onPress, colors }: { label: string; selected: boolean; onPress: () => void; colors: any }) {
   return (
     <Pressable
-      onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        onPress();
-      }}
-      style={[
-        chipStyles.chip,
-        {
-          backgroundColor: selected ? colors.accent : colors.surface,
-          borderColor: selected ? colors.accent : colors.border,
-        },
-      ]}
+      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onPress(); }}
+      style={[chipStyles.chip, { backgroundColor: selected ? colors.accent : colors.surface, borderColor: selected ? colors.accent : colors.border }]}
     >
-      <Text
-        style={[
-          chipStyles.chipText,
-          { color: selected ? colors.background : colors.foreground },
-        ]}
-        numberOfLines={1}
-      >
-        {label}
-      </Text>
+      <Text style={[chipStyles.chipText, { color: selected ? colors.background : colors.foreground }]} numberOfLines={1}>{label}</Text>
     </Pressable>
   );
 }
-
-// ─── Main sheet ────────────────────────────────────────────────────────────
 
 interface ScanFilterSheetProps {
   visible: boolean;
@@ -157,68 +125,27 @@ interface ScanFilterSheetProps {
   onClose: () => void;
 }
 
-export function ScanFilterSheet({
-  visible,
-  filters,
-  onChange,
-  onClose,
-}: ScanFilterSheetProps) {
+export function ScanFilterSheet({ visible, filters, onChange, onClose }: ScanFilterSheetProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
 
-  const sets =
-    filters.game === "One Piece"
-      ? ONE_PIECE_SETS
-      : filters.game === "Pokemon"
-      ? POKEMON_SETS
-      : [];
+  const sets = filters.game === "One Piece" ? ONE_PIECE_SETS : filters.game === "Pokemon" ? POKEMON_SETS : [];
+  const finishOptions: ScanFinish[] = filters.game === "One Piece" ? OP_FINISH_OPTIONS : POKEMON_FINISH_OPTIONS;
 
-  const finishOptions: ScanFinish[] =
-    filters.game === "One Piece"
-      ? OP_FINISH_OPTIONS
-      : POKEMON_FINISH_OPTIONS;
-
-  const setGame = (g: ScanGame) => {
-    // Reset set + finish when game changes
-    onChange({ ...filters, game: g === filters.game ? null : g, set: null, finish: null });
-  };
-
-  const setSet = (code: string) =>
-    onChange({ ...filters, set: code === filters.set ? null : code });
-
-  const setLanguage = (l: ScanLanguage) =>
-    onChange({ ...filters, language: l === filters.language ? null : l });
-
-  const setFinish = (f: ScanFinish) =>
-    onChange({ ...filters, finish: f === filters.finish ? null : f });
-
-  const clearAll = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    onChange(EMPTY_FILTERS);
-  };
-
+  const setGame = (g: ScanGame) => onChange({ ...filters, game: g === filters.game ? null : g, set: null, finish: null });
+  const setSet = (code: string) => onChange({ ...filters, set: code === filters.set ? null : code });
+  const setLanguage = (l: ScanLanguage) => onChange({ ...filters, language: l === filters.language ? null : l });
+  const setFinish = (f: ScanFinish) => onChange({ ...filters, finish: f === filters.finish ? null : f });
+  const clearAll = () => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); onChange(EMPTY_FILTERS); };
   const hasAny = activeFilterCount(filters) > 0;
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={sheetStyles.backdrop} onPress={onClose} />
-      <View
-        style={[
-          sheetStyles.sheet,
-          { backgroundColor: colors.card, paddingBottom: insets.bottom + 20 },
-        ]}
-      >
-        {/* Handle */}
+      <View style={[sheetStyles.sheet, { backgroundColor: colors.card, paddingBottom: insets.bottom + 20 }]}>
         <View style={sheetStyles.handleWrap}>
           <View style={[sheetStyles.handle, { backgroundColor: colors.border }]} />
         </View>
-
-        {/* Title row */}
         <View style={sheetStyles.titleRow}>
           <Text style={[sheetStyles.title, { color: colors.foreground }]}>Scan Filters</Text>
           <View style={sheetStyles.titleActions}>
@@ -227,107 +154,50 @@ export function ScanFilterSheet({
                 <Text style={[sheetStyles.clearText, { color: colors.accent }]}>Clear All</Text>
               </Pressable>
             )}
-            <Pressable
-              onPress={onClose}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Ionicons name="close" size={20} color={colors.mutedForeground} />
+            <Pressable onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Icon name="close" size={20} color={colors.mutedForeground} />
             </Pressable>
           </View>
         </View>
-        <Text style={[sheetStyles.subtitle, { color: colors.mutedForeground }]}>
-          Set filters override OCR — unset fields are auto-detected
-        </Text>
-
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          bounces={false}
-          contentContainerStyle={sheetStyles.scroll}
-        >
-          {/* Game */}
+        <Text style={[sheetStyles.subtitle, { color: colors.mutedForeground }]}>Set filters override OCR — unset fields are auto-detected</Text>
+        <ScrollView showsVerticalScrollIndicator={false} bounces={false} contentContainerStyle={sheetStyles.scroll}>
           <Section label="Game" colors={colors}>
             <View style={sheetStyles.chipRow}>
               {(["Pokemon", "One Piece"] as ScanGame[]).map((g) => (
-                <Chip
-                  key={g!}
-                  label={g!}
-                  selected={filters.game === g}
-                  onPress={() => setGame(g)}
-                  colors={colors}
-                />
+                <Chip key={g!} label={g!} selected={filters.game === g} onPress={() => setGame(g)} colors={colors} />
               ))}
             </View>
           </Section>
-
-          {/* Set — only shown when a game is selected */}
           {filters.game && (
             <Section label="Set" colors={colors}>
               <View style={sheetStyles.chipRow}>
                 {sets.map((s) => (
-                  <Chip
-                    key={s.code}
-                    label={s.name}
-                    selected={filters.set === s.code}
-                    onPress={() => setSet(s.code)}
-                    colors={colors}
-                  />
+                  <Chip key={s.code} label={s.name} selected={filters.set === s.code} onPress={() => setSet(s.code)} colors={colors} />
                 ))}
               </View>
             </Section>
           )}
-
-          {/* Language */}
           <Section label="Language" colors={colors}>
             <View style={sheetStyles.chipRow}>
               {(["English", "Japanese"] as ScanLanguage[]).map((l) => (
-                <Chip
-                  key={l!}
-                  label={l!}
-                  selected={filters.language === l}
-                  onPress={() => setLanguage(l)}
-                  colors={colors}
-                />
+                <Chip key={l!} label={l!} selected={filters.language === l} onPress={() => setLanguage(l)} colors={colors} />
               ))}
             </View>
           </Section>
-
-          {/* Finish */}
           <Section label="Finish" colors={colors}>
             <View style={sheetStyles.chipRow}>
               {finishOptions.map((f) => (
-                <Chip
-                  key={f!}
-                  label={f!}
-                  selected={filters.finish === f}
-                  onPress={() => setFinish(f)}
-                  colors={colors}
-                />
+                <Chip key={f!} label={f!} selected={filters.finish === f} onPress={() => setFinish(f)} colors={colors} />
               ))}
-              {/* Show all options when no game selected */}
-              {!filters.game &&
-                (["Normal", "Foil", "Reverse Foil"] as ScanFinish[]).filter(
-                  (x) => !finishOptions.includes(x)
-                ).length > 0 &&
-                (["Reverse Foil"] as ScanFinish[]).map((f) => (
-                  <Chip
-                    key={f!}
-                    label={f!}
-                    selected={filters.finish === f}
-                    onPress={() => setFinish(f)}
-                    colors={colors}
-                  />
-                ))}
+              {!filters.game && (["Reverse Foil"] as ScanFinish[]).map((f) => (
+                <Chip key={f!} label={f!} selected={filters.finish === f} onPress={() => setFinish(f)} colors={colors} />
+              ))}
             </View>
           </Section>
         </ScrollView>
-
-        {/* Done */}
         <Pressable
           style={[sheetStyles.doneBtn, { backgroundColor: colors.accent }]}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            onClose();
-          }}
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); onClose(); }}
         >
           <Text style={[sheetStyles.doneBtnText, { color: colors.background }]}>Done</Text>
         </Pressable>
@@ -336,20 +206,10 @@ export function ScanFilterSheet({
   );
 }
 
-function Section({
-  label,
-  colors,
-  children,
-}: {
-  label: string;
-  colors: any;
-  children: React.ReactNode;
-}) {
+function Section({ label, colors, children }: { label: string; colors: any; children: React.ReactNode }) {
   return (
     <View style={sheetStyles.section}>
-      <Text style={[sheetStyles.sectionLabel, { color: colors.mutedForeground }]}>
-        {label.toUpperCase()}
-      </Text>
+      <Text style={[sheetStyles.sectionLabel, { color: colors.mutedForeground }]}>{label.toUpperCase()}</Text>
       {children}
     </View>
   );
@@ -357,54 +217,24 @@ function Section({
 
 const sheetStyles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)" },
-  sheet: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingHorizontal: 20,
-    maxHeight: "85%",
-  },
+  sheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, maxHeight: "85%" },
   handleWrap: { alignItems: "center", paddingTop: 10, paddingBottom: 4 },
   handle: { width: 36, height: 4, borderRadius: 2 },
-  titleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 4,
-    marginTop: 8,
-  },
+  titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4, marginTop: 8 },
   title: { fontSize: 18, fontFamily: "Poppins_700Bold" },
   titleActions: { flexDirection: "row", alignItems: "center", gap: 14 },
   clearBtn: { paddingVertical: 4 },
   clearText: { fontSize: 13, fontFamily: "Poppins_500Medium" },
-  subtitle: {
-    fontSize: 12,
-    fontFamily: "Poppins_400Regular",
-    marginBottom: 16,
-  },
+  subtitle: { fontSize: 12, fontFamily: "Poppins_400Regular", marginBottom: 16 },
   scroll: { gap: 4, paddingBottom: 16 },
   section: { marginBottom: 16 },
-  sectionLabel: {
-    fontSize: 10,
-    fontFamily: "Poppins_600SemiBold",
-    letterSpacing: 1,
-    marginBottom: 10,
-  },
+  sectionLabel: { fontSize: 10, fontFamily: "Poppins_600SemiBold", letterSpacing: 1, marginBottom: 10 },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  doneBtn: {
-    paddingVertical: 15,
-    borderRadius: 16,
-    alignItems: "center",
-    marginTop: 4,
-  },
+  doneBtn: { paddingVertical: 15, borderRadius: 16, alignItems: "center", marginTop: 4 },
   doneBtnText: { fontSize: 16, fontFamily: "Poppins_600SemiBold" },
 });
 
 const chipStyles = StyleSheet.create({
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1.5,
-  },
+  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5 },
   chipText: { fontSize: 13, fontFamily: "Poppins_500Medium" },
 });

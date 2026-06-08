@@ -1,13 +1,13 @@
 import { BlurView } from "expo-blur";
 import { Tabs } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Platform, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { Icon } from "@/components/Icon";
 import { useColors } from "@/hooks/useColors";
 
-// Native-only modules — lazy require so Metro doesn’t resolve them on web
+// Native-only modules — lazy require so Metro doesn't resolve them on web
 let isLiquidGlassAvailable: (() => boolean) | null = null;
 let NativeTabs: any = null;
 let NativeTabsIcon: any = null;
@@ -58,9 +58,7 @@ function ClassicTabLayout() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const isIOS = Platform.OS === "ios";
-  const isWeb = Platform.OS === "web";
 
-  // Tab bar height: 49px tabs + safe area bottom inset
   const tabBarHeight = 49 + insets.bottom;
 
   return (
@@ -94,7 +92,7 @@ function ClassicTabLayout() {
           tabBarIcon: ({ color }) =>
             isIOS && SymbolView
               ? <SymbolView name="list.bullet.rectangle" tintColor={color} size={24} />
-              : <Ionicons name="list-outline" size={24} color={color} />,
+              : <Icon name="list-outline" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -104,7 +102,7 @@ function ClassicTabLayout() {
           tabBarIcon: ({ color }) =>
             isIOS && SymbolView
               ? <SymbolView name="camera.viewfinder" tintColor={color} size={24} />
-              : <Ionicons name="scan-outline" size={24} color={color} />,
+              : <Icon name="scan-outline" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -114,7 +112,7 @@ function ClassicTabLayout() {
           tabBarIcon: ({ color }) =>
             isIOS && SymbolView
               ? <SymbolView name="magnifyingglass" tintColor={color} size={24} />
-              : <Ionicons name="search-outline" size={24} color={color} />,
+              : <Icon name="search-outline" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -124,7 +122,7 @@ function ClassicTabLayout() {
           tabBarIcon: ({ color }) =>
             isIOS && SymbolView
               ? <SymbolView name="square.stack.3d.up" tintColor={color} size={24} />
-              : <Ionicons name="albums-outline" size={24} color={color} />,
+              : <Icon name="albums-outline" size={24} color={color} />,
         }}
       />
     </Tabs>
