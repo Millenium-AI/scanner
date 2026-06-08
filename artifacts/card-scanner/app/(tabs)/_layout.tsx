@@ -65,7 +65,9 @@ function ClassicTabLayout() {
         options={{
           title: "Lists",
           tabBarIcon: ({ color }) =>
-            isIOS ? <SymbolView name="list.bullet.rectangle" tintColor={color} size={24} /> : <Ionicons name="list-outline" size={24} color={color} />,
+            isIOS && !isWeb
+              ? <SymbolView name="list.bullet.rectangle" tintColor={color} size={24} />
+              : <Ionicons name="list-outline" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -73,7 +75,9 @@ function ClassicTabLayout() {
         options={{
           title: "Scan",
           tabBarIcon: ({ color }) =>
-            isIOS ? <SymbolView name="camera.viewfinder" tintColor={color} size={24} /> : <Ionicons name="scan-outline" size={24} color={color} />,
+            isIOS && !isWeb
+              ? <SymbolView name="camera.viewfinder" tintColor={color} size={24} />
+              : <Ionicons name="scan-outline" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -81,7 +85,9 @@ function ClassicTabLayout() {
         options={{
           title: "Search",
           tabBarIcon: ({ color }) =>
-            isIOS ? <SymbolView name="magnifyingglass" tintColor={color} size={24} /> : <Ionicons name="search-outline" size={24} color={color} />,
+            isIOS && !isWeb
+              ? <SymbolView name="magnifyingglass" tintColor={color} size={24} />
+              : <Ionicons name="search-outline" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -89,7 +95,9 @@ function ClassicTabLayout() {
         options={{
           title: "Collection",
           tabBarIcon: ({ color }) =>
-            isIOS ? <SymbolView name="square.stack.3d.up" tintColor={color} size={24} /> : <Ionicons name="albums-outline" size={24} color={color} />,
+            isIOS && !isWeb
+              ? <SymbolView name="square.stack.3d.up" tintColor={color} size={24} />
+              : <Ionicons name="albums-outline" size={24} color={color} />,
         }}
       />
     </Tabs>

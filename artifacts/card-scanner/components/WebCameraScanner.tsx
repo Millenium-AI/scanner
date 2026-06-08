@@ -5,10 +5,7 @@
  * • Streams to a <video> element that fills the scan frame
  * • Exposes `captureFrame()` which resolves to a base64 JPEG data-URI
  * • Handles permission denial gracefully
- *
- * Chrome for iOS note: getUserMedia IS supported in Chrome 88+ on iOS 14.3+
- * when the page is served over HTTPS (or localhost). The stream uses the
- * native iOS camera picker inside the WKWebView engine.
+ * • Renders the 4-corner bracket overlay + dim background matching the native build
  */
 
 import React, {
@@ -18,19 +15,22 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Dimensions, StyleSheet, Text, View } from 'react-native';
 
 export interface WebCameraScannerHandle {
   captureFrame: () => Promise<string | null>;
 }
 
 interface Props {
-  /** Width/height of the visible frame box in CSS px */
+  /** Must match the FRAME_W / FRAME_H constants in index.tsx (300 × 420) */
   frameWidth?: number;
   frameHeight?: number;
   accentColor?: string;
   onPermissionDenied?: () => void;
 }
+
+const SCREEN_W = Dimensions.get('window').width;
+const SCREEN_H = Dimensions.get('window').height;
 
 const WebCameraScanner = forwardRef<WebCameraScannerHandle, Props>(
   function WebCameraScanner(
@@ -112,9 +112,15 @@ const WebCameraScanner = forwardRef<WebCameraScannerHandle, Props>(
       },
     }));
 
+    // Dim regions: top / bottom / left / right around the frame
+    const dimTop    = (SCREEN_H - frameHeight) / 2;
+    const dimLeft   = (SCREEN_W - frameWidth)  / 2;
+
     return (
-      <View style={[styles.wrapper, { width: frameWidth, height: frameHeight }]}>
-        {/* Live video fill */}
+      // Outer container fills the whole screen (caller passes SCREEN_W / SCREEN_H)
+      <View style={[styles.fullScreen, { width: SCREEN_W, height: SCREEN_H }]}>
+
+        {/* Live video fills the whole screen */}
         {/* @ts-ignore — HTMLVideoElement is web-only */}
         <video
           ref={videoRef as React.Ref<HTMLVideoElement>}
@@ -124,38 +130,60 @@ const WebCameraScanner = forwardRef<WebCameraScannerHandle, Props>(
             width: '100%',
             height: '100%',
             objectFit: 'cover',
-            borderRadius: 16,
           }}
           playsInline
           muted
           autoPlay
         />
 
-        {/* Corner brackets overlay */}
-        <View style={styles.cornersOverlay} pointerEvents="none">
+        {/* ── Dim overlay — 4 panels around the 300×420 frame ── */}
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          {/* Top */}
+          <View style={[styles.dim, { top: 0, left: 0, right: 0, height: dimTop }]} />
+          {/* Bottom */}
+          <View style={[styles.dim, { top: dimTop + frameHeight, left: 0, right: 0, bottom: 0 }]} />
+          {/* Left */}
+          <View style={[styles.dim, { top: dimTop, left: 0, width: dimLeft, height: frameHeight }]} />
+          {/* Right */}
+          <View style={[styles.dim, { top: dimTop, left: dimLeft + frameWidth, right: 0, height: frameHeight }]} />
+        </View>
+
+        {/* ── 4-corner bracket overlay ── */}
+        <View
+          style={[
+            styles.frameBox,
+            {
+              width: frameWidth,
+              height: frameHeight,
+              top: dimTop,
+              left: dimLeft,
+            },
+          ]}
+          pointerEvents="none"
+        >
           <View style={[styles.corner, styles.cornerTL, { borderColor: accentColor }]} />
           <View style={[styles.corner, styles.cornerTR, { borderColor: accentColor }]} />
           <View style={[styles.corner, styles.cornerBL, { borderColor: accentColor }]} />
           <View style={[styles.corner, styles.cornerBR, { borderColor: accentColor }]} />
         </View>
 
-        {/* Requesting / denied / unsupported overlays */}
+        {/* Status overlays */}
         {status === 'requesting' && (
-          <View style={styles.overlay}>
+          <View style={styles.statusOverlay}>
             <ActivityIndicator color={accentColor} />
-            <Text style={styles.overlayText}>Starting camera…</Text>
+            <Text style={styles.statusText}>Starting camera…</Text>
           </View>
         )}
         {status === 'denied' && (
-          <View style={styles.overlay}>
-            <Text style={styles.overlayText}>
+          <View style={styles.statusOverlay}>
+            <Text style={styles.statusText}>
               Camera access denied.{`\n`}Please allow camera in browser settings and reload.
             </Text>
           </View>
         )}
         {status === 'unsupported' && (
-          <View style={styles.overlay}>
-            <Text style={styles.overlayText}>
+          <View style={styles.statusOverlay}>
+            <Text style={styles.statusText}>
               Live camera not supported.{`\n`}Use the Upload button below.
             </Text>
           </View>
@@ -167,61 +195,65 @@ const WebCameraScanner = forwardRef<WebCameraScannerHandle, Props>(
 
 export default WebCameraScanner;
 
+const CORNER_SIZE = 26;
+const CORNER_THICKNESS = 3;
+const CORNER_RADIUS = 6;
+
 const styles = StyleSheet.create({
-  wrapper: {
+  fullScreen: {
     position: 'relative',
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: '#111',
+    backgroundColor: '#000',
   },
-  cornersOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 16,
+  dim: {
+    position: 'absolute',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  frameBox: {
+    position: 'absolute',
   },
   corner: {
     position: 'absolute',
-    width: 26,
-    height: 26,
-    borderWidth: 3,
+    width: CORNER_SIZE,
+    height: CORNER_SIZE,
+    borderWidth: CORNER_THICKNESS,
   },
   cornerTL: {
     top: 0,
     left: 0,
     borderRightWidth: 0,
     borderBottomWidth: 0,
-    borderTopLeftRadius: 6,
+    borderTopLeftRadius: CORNER_RADIUS,
   },
   cornerTR: {
     top: 0,
     right: 0,
     borderLeftWidth: 0,
     borderBottomWidth: 0,
-    borderTopRightRadius: 6,
+    borderTopRightRadius: CORNER_RADIUS,
   },
   cornerBL: {
     bottom: 0,
     left: 0,
     borderRightWidth: 0,
     borderTopWidth: 0,
-    borderBottomLeftRadius: 6,
+    borderBottomLeftRadius: CORNER_RADIUS,
   },
   cornerBR: {
     bottom: 0,
     right: 0,
     borderLeftWidth: 0,
     borderTopWidth: 0,
-    borderBottomRightRadius: 6,
+    borderBottomRightRadius: CORNER_RADIUS,
   },
-  overlay: {
+  statusOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.65)',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
     padding: 24,
-    borderRadius: 16,
   },
-  overlayText: {
+  statusText: {
     color: 'rgba(255,255,255,0.85)',
     fontSize: 13,
     textAlign: 'center',
