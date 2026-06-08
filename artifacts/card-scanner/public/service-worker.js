@@ -7,9 +7,11 @@
  *  • Static assets (_expo bundles, icons, fonts): cache-first.
  *  • Anything that isn't a GET, or that targets the identify backend, is passed
  *    straight through to the network and never cached (camera uploads, etc.).
+ *
+ * v3 — bumped to force old cached bundles to be evicted on next load.
  */
 
-const CACHE_NAME = "cardscan-v2";
+const CACHE_NAME = "cardscan-v3";
 const SHELL_ASSETS = ["/", "/index.html", "/manifest.json"];
 
 self.addEventListener("install", (event) => {

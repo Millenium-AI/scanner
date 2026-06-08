@@ -7,6 +7,9 @@
 #  • base is set to this package so Netlify runs the build from here even though
 #    the repo is a pnpm monorepo. Netlify installs from the repo root lockfile.
 #  • getUserMedia requires HTTPS — Netlify serves HTTPS by default.
+#  • EXPO_PUBLIC_BACKEND_URL must be set in the Netlify UI (Site settings →
+#    Environment variables). Do NOT hardcode it here — netlify.toml values
+#    override the UI and would bake the wrong URL into the bundle.
 
 [build]
   base    = "artifacts/card-scanner"
@@ -20,12 +23,8 @@
   # with. pnpm 10 changes how `overrides` are compared against the lockfile and
   # fails the frozen install with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
   PNPM_VERSION = "9.15.9"
-  # The card-identify backend the app talks to. Override in the Netlify UI
-  # (Site settings -> Environment variables) with your real HTTPS endpoint.
-  # Must be HTTPS in production or the browser will block the mixed-content fetch.
-  EXPO_PUBLIC_BACKEND_URL = "https://your-backend.example.com"
 
-# ── Headers ────────────────────────────────────────────────────────────────
+# ── Headers ──────────────────────────────────────────────────────────────────────
 
 # Allow this origin (and itself) to use the camera in standalone PWA mode.
 [[headers]]
@@ -55,7 +54,7 @@
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
-# ── Redirects ────────────────────────────────────────────────────────────────
+# ── Redirects ────────────────────────────────────────────────────────────────────
 
 # SPA fallback: every unknown path serves index.html so client-side routing
 # (expo-router) handles it. Real files (manifest, sw, icons, _expo, assets)
