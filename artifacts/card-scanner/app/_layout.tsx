@@ -29,25 +29,11 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
-  /**
-   * WHY WE LOAD IONICONS HERE
-   * --------------------------
-   * @expo/vector-icons v14+ (SDK 50+) dropped automatic font registration on
-   * Metro web. The font must be explicitly included in the Metro asset graph by
-   * require()-ing the .ttf file. We copy Ionicons.ttf into assets/fonts/ via
-   * `scripts/copy-fonts.js` (also runs as postinstall), then load it here.
-   *
-   * Using the font-family name 'Ionicons' is critical — it must match the name
-   * that @expo/vector-icons uses internally when it calls createIconSet().
-   */
   const [fontsLoaded, fontError] = useFonts({
     Poppins_400Regular,
     Poppins_500Medium,
     Poppins_600SemiBold,
     Poppins_700Bold,
-    // Ionicons loaded from local asset so Metro bundles the TTF on web.
-    // The key 'Ionicons' MUST match what @expo/vector-icons registers internally.
-    Ionicons: require("../assets/fonts/Ionicons.ttf"),
   });
 
   useEffect(() => {
