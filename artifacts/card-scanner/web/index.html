@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+
+    <!-- Viewport: prevent zoom, fill safe area -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"
+    />
+
+    <!-- PWA: Web App Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- PWA: iOS / Safari home-screen support -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="CardScan" />
+    <link rel="apple-touch-icon" href="/assets/images/icon.png" />
+
+    <!-- Theme color (status bar tint in standalone mode) -->
+    <meta name="theme-color" content="#0D1117" />
+
+    <!-- Prevent tap highlight flicker -->
+    <style>
+      * { -webkit-tap-highlight-color: transparent; }
+      html, body, #root { height: 100%; margin: 0; padding: 0; background: #0D1117; }
+      /* Prevent pull-to-refresh and overscroll bounce in standalone PWA */
+      body { overscroll-behavior: none; }
+    </style>
+
+    <title>CardScan</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Service Worker registration -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker
+            .register('/service-worker.js')
+            .then(function (reg) {
+              console.log('[SW] registered', reg.scope);
+            })
+            .catch(function (err) {
+              console.warn('[SW] registration failed', err);
+            });
+        });
+      }
+    </script>
+  </body>
+</html>
