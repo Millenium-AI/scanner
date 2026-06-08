@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+
+    <!-- Full-viewport PWA: no address bar, no rubber-band white borders -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#0D1117" />
+
+    <title>CardScan</title>
+    <link rel="manifest" href="/manifest.json" />
+
+    <style>
+      /* Kill all white flash / rubber-band areas */
+      html, body {
+        background: #0D1117;
+        margin: 0;
+        padding: 0;
+        overscroll-behavior: none;
+        overflow: hidden;
+        height: 100%;
+        width: 100%;
+      }
+      #root {
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+      }
+
+      /*
+        Ionicons @font-face — loaded here so the font is available before
+        React mounts, which prevents the blank-square flash on first render.
+        Expo’s web bundler copies the .ttf from node_modules into the output
+        directory automatically when it detects the @expo/vector-icons package.
+      */
+      @font-face {
+        font-family: 'Ionicons';
+        src: url('https://unpkg.com/@expo/vector-icons@14.0.0/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf') format('truetype');
+        font-weight: normal;
+        font-style: normal;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

@@ -55,10 +55,9 @@ const SCREEN_H = Dimensions.get("window").height;
 
 const FRAME_W = 300;
 const FRAME_H = 420;
-// Shift frame up so it doesn’t overlap the capture button row
-const FRAME_OFFSET_Y = -80;
+// Positive = shift frame down from center, negative = up
+const FRAME_OFFSET_Y = 20;
 
-// Tab bar height used to offset the bottom control row
 const TAB_BAR_H = 49;
 
 async function cropToFrame(
@@ -181,23 +180,16 @@ function WebScannerScreen() {
   const filterCount = activeFilterCount(filters);
   const filtersRef = useRef<ScanFilters>(EMPTY_FILTERS);
 
-  // Bottom of the capture row sits above the tab bar
   const bottomPad = insets.bottom + TAB_BAR_H + 16;
 
   const runIdentify = useCallback(async (uri: string) => {
-    setScanState("scanning");
-    setErrorMsg("");
+    setScanState("scanning"); setErrorMsg("");
     try {
       const result = await identifyCard(uri, filtersRef.current);
       if (result.type === "variants") {
-        setVariantCards(result.cards);
-        setShowVariantPicker(true);
-        setScanState("idle");
-        return;
+        setVariantCards(result.cards); setShowVariantPicker(true); setScanState("idle"); return;
       }
-      setResultCard(result.card);
-      setShowResult(true);
-      setScanState("success");
+      setResultCard(result.card); setShowResult(true); setScanState("success");
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to identify card");
       setScanState("error");
@@ -245,7 +237,6 @@ function WebScannerScreen() {
         )}
       </View>
 
-      {/* Header */}
       <View style={[styles.nativeHeader, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.nativeHeaderTitle}>Scan Card</Text>
         <View style={styles.headerRight}>
@@ -264,7 +255,6 @@ function WebScannerScreen() {
         </View>
       )}
 
-      {/* Hint text below the frame */}
       {!cameraDenied && (
         <View style={[styles.hintRow, { bottom: bottomPad + 100 }]}>
           <Text style={styles.nativeHint}>
@@ -273,7 +263,6 @@ function WebScannerScreen() {
         </View>
       )}
 
-      {/* Capture controls */}
       {!cameraDenied && (
         <View style={[styles.nativeBottom, { paddingBottom: bottomPad }]}>
           <Pressable style={styles.nativeUpload} onPress={handleUpload} disabled={scanState === "scanning"}>
@@ -328,7 +317,6 @@ function NativeScannerScreen() {
   const [frameLayout, setFrameLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const frameLayoutRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
-  // Native bottom: sits above tab bar + home indicator
   const bottomPad = insets.bottom + TAB_BAR_H + 16;
 
   const handleFrameLayout = useCallback((e: any) => {

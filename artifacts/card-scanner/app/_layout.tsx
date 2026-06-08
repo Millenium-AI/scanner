@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
+import { Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -20,6 +21,28 @@ SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
+// On web, @expo/vector-icons uses CSS @font-face — useFonts() won't wire it up.
+// We inject the rule manually so Ionicons glyphs resolve on first render.
+function useIoniconsFontWeb() {
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    if (document.getElementById("ionicons-font-face")) return;
+    const style = document.createElement("style");
+    style.id = "ionicons-font-face";
+    // The .ttf is served by Expo's web bundler from node_modules automatically
+    style.textContent = `
+      @font-face {
+        font-family: 'Ionicons';
+        src: url('./assets/fonts/Ionicons.ttf') format('truetype'),
+             url('../assets/fonts/Ionicons.ttf') format('truetype');
+        font-weight: normal;
+        font-style: normal;
+      }
+    `;
+    document.head.appendChild(style);
+  }, []);
+}
+
 function RootLayoutNav() {
   return (
     <Stack screenOptions={{ headerBackTitle: "Back" }}>
@@ -29,15 +52,13 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  useIoniconsFontWeb();
+
   const [fontsLoaded, fontError] = useFonts({
     Poppins_400Regular,
     Poppins_500Medium,
     Poppins_600SemiBold,
     Poppins_700Bold,
-    // @expo/vector-icons resolves its font by the exact key "Ionicons".
-    // Using any other key name means the icon glyph map never links up
-    // and every icon renders as a blank square on web.
-    Ionicons: require("@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf"),
   });
 
   useEffect(() => {
