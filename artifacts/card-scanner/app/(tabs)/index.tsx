@@ -1,10 +1,9 @@
 import * as Haptics from "expo-haptics";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Animated,
   Dimensions,
   Modal,
   Platform,
@@ -30,7 +29,6 @@ import { identifyCard } from "@/services/cardScanService";
 import WebCameraScanner, {
   WebCameraScannerHandle,
 } from "@/components/WebCameraScanner";
-import { useAutoScanWeb } from "@/hooks/useAutoScanWeb";
 
 let CameraView: React.ComponentType<{
   ref?: React.Ref<unknown>;
@@ -52,15 +50,14 @@ if (Platform.OS !== "web") {
 
 type ScanState = "idle" | "scanning" | "success" | "error";
 
-const CONFIDENCE_THRESHOLD = 0.85;
-const AUTO_SCAN_INTERVAL_MS = 3000;
-const AUTO_SCAN_BACKOFF_MS = 6000;
 const SCREEN_W = Dimensions.get("window").width;
 const SCREEN_H = Dimensions.get("window").height;
 
-// Fixed card frame dimensions — used by both web overlay and native scan box
+// Card frame dimensions
 const FRAME_W = 300;
 const FRAME_H = 420;
+// Shift the frame up from center so it clears the capture button row
+const FRAME_OFFSET_Y = -60;
 
 async function cropToFrame(
   photoUri: string,
@@ -161,7 +158,51 @@ function ListDropdown({ colors, onClose }: { colors: any; onClose: () => void })
   );
 }
 
-// ─── Web version ─────────────────────────────────────────────────────────────
+// ─── Active filter pills ──────────────────────────────────────────────────────
+function ActiveFilterPills({
+  filters,
+  colors,
+  dark,
+  onClear,
+}: {
+  filters: ScanFilters;
+  colors: any;
+  dark?: boolean;
+  onClear: (key: keyof ScanFilters) => void;
+}) {
+  const pills: { key: keyof ScanFilters; label: string }[] = [];
+  if (filters.game)     pills.push({ key: "game",     label: filters.game });
+  if (filters.set)      pills.push({ key: "set",      label: filters.set });
+  if (filters.language) pills.push({ key: "language", label: filters.language });
+  if (filters.finish)   pills.push({ key: "finish",   label: filters.finish });
+
+  return (
+    <View style={pillStyles.row}>
+      {pills.map(({ key, label }) => (
+        <Pressable
+          key={key}
+          style={[
+            pillStyles.pill,
+            dark
+              ? { backgroundColor: "rgba(255,255,255,0.18)" }
+              : { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 },
+          ]}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onClear(key);
+          }}
+        >
+          <Text style={[pillStyles.pillText, { color: dark ? "#fff" : colors.foreground }]}>
+            {label}
+          </Text>
+          <Ionicons name="close" size={11} color={dark ? "rgba(255,255,255,0.7)" : colors.mutedForeground} />
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+// ─── Web scanner ─────────────────────────────────────────────────────────────
 function WebScannerScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -181,18 +222,9 @@ function WebScannerScreen() {
   const filterCount = activeFilterCount(filters);
 
   const filtersRef = useRef<ScanFilters>(EMPTY_FILTERS);
-  useEffect(() => { filtersRef.current = filters; }, [filters]);
-
-  const backoffRef = useRef<() => void>(() => {});
-
-  const autoScanEnabled =
-    !cameraDenied &&
-    scanState === "idle" &&
-    !showResult &&
-    !showVariantPicker;
 
   const runIdentify = useCallback(
-    async (uri: string, auto = false) => {
+    async (uri: string) => {
       setScanState("scanning");
       setErrorMsg("");
       try {
@@ -203,25 +235,10 @@ function WebScannerScreen() {
           setScanState("idle");
           return;
         }
-        const card = result.card;
-        if (
-          auto &&
-          typeof card.confidence === "number" &&
-          card.confidence < CONFIDENCE_THRESHOLD
-        ) {
-          backoffRef.current?.();
-          setScanState("idle");
-          return;
-        }
-        setResultCard(card);
+        setResultCard(result.card);
         setShowResult(true);
         setScanState("success");
       } catch (err: unknown) {
-        if (auto) {
-          backoffRef.current?.();
-          setScanState("idle");
-          return;
-        }
         setErrorMsg(err instanceof Error ? err.message : "Failed to identify card");
         setScanState("error");
       }
@@ -229,19 +246,23 @@ function WebScannerScreen() {
     []
   );
 
-  const handleAutoCapture = useCallback(
-    (dataUri: string) => { void runIdentify(dataUri, true); },
-    [runIdentify]
-  );
+  const handleCapture = async () => {
+    if (scanState === "scanning" || !cameraRef.current) return;
+    const dataUri = await cameraRef.current.captureFrame();
+    if (dataUri) await runIdentify(dataUri);
+  };
 
-  const { triggerBackoff } = useAutoScanWeb({
-    cameraRef,
-    enabled: autoScanEnabled,
-    intervalMs: AUTO_SCAN_INTERVAL_MS,
-    backoffMs: AUTO_SCAN_BACKOFF_MS,
-    onCapture: handleAutoCapture,
-  });
-  useEffect(() => { backoffRef.current = triggerBackoff; }, [triggerBackoff]);
+  const handleUpload = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: "images", quality: 0.85 });
+    if (!result.canceled && result.assets[0]) await runIdentify(result.assets[0].uri);
+  };
+
+  const handleScanAgain = () => {
+    setShowResult(false);
+    setResultCard(null);
+    setScanState("idle");
+    setErrorMsg("");
+  };
 
   const handleVariantSelect = (card: CardScanResult) => {
     setShowVariantPicker(false);
@@ -257,33 +278,15 @@ function WebScannerScreen() {
     setScanState("idle");
   };
 
-  const handleCapture = async () => {
-    if (scanState === "scanning" || !cameraRef.current) return;
-    const dataUri = await cameraRef.current.captureFrame();
-    if (dataUri) await runIdentify(dataUri, false);
-  };
-
-  const handleUpload = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: "images", quality: 0.85 });
-    if (!result.canceled && result.assets[0]) await runIdentify(result.assets[0].uri, false);
-  };
-
-  const handleScanAgain = () => {
-    setShowResult(false);
-    setResultCard(null);
-    setScanState("idle");
-    setErrorMsg("");
-  };
-
   return (
     <View style={[styles.container, { backgroundColor: "#000" }]}>
-      {/* Live camera fills the screen */}
       <View style={StyleSheet.absoluteFill}>
         {!cameraDenied ? (
           <WebCameraScanner
             ref={cameraRef}
             frameWidth={FRAME_W}
             frameHeight={FRAME_H}
+            frameOffsetY={FRAME_OFFSET_Y}
             accentColor={colors.accent}
             onPermissionDenied={() => setCameraDenied(true)}
           />
@@ -294,7 +297,7 @@ function WebScannerScreen() {
             </View>
             <Text style={[styles.permTitle, { color: colors.foreground }]}>Camera Access Required</Text>
             <Text style={[styles.permSub, { color: colors.mutedForeground }]}>
-              Allow camera access in your browser settings and reload to scan cards in real time.
+              Allow camera access in your browser settings and reload.
             </Text>
             <Pressable onPress={handleUpload} style={styles.uploadLink}>
               <Text style={[styles.uploadLinkText, { color: colors.mutedForeground }]}>Upload a photo instead</Text>
@@ -329,16 +332,16 @@ function WebScannerScreen() {
 
       {!cameraDenied && (
         <View style={styles.frameOverlay} pointerEvents="none">
-          <Text style={styles.nativeHint}>
-            {scanState === "scanning" ? "Identifying" :
+          <Text style={[styles.nativeHint, { marginTop: FRAME_H + 16 + FRAME_OFFSET_Y + (SCREEN_H / 2 - FRAME_H / 2) }]}>
+            {scanState === "scanning" ? "Identifying…" :
               scanState === "error" ? errorMsg :
-              "Hold card steady \u2014 scanning automatically"}
+              "Tap the button to scan"}
           </Text>
         </View>
       )}
 
       {!cameraDenied && (
-        <View style={[styles.nativeBottom, { paddingBottom: insets.bottom + 90 }]}>
+        <View style={[styles.nativeBottom, { paddingBottom: insets.bottom + 32 }]}>
           <Pressable style={styles.nativeUpload} onPress={handleUpload} disabled={scanState === "scanning"}>
             <Ionicons name="image-outline" size={22} color="rgba(255,255,255,0.7)" />
           </Pressable>
@@ -378,7 +381,7 @@ function WebScannerScreen() {
   );
 }
 
-// ─── Native version ───────────────────────────────────────────────────────────
+// ─── Native scanner ───────────────────────────────────────────────────────────
 function NativeScannerScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -394,40 +397,13 @@ function NativeScannerScreen() {
   const [variantCards, setVariantCards] = useState<CardScanResult[]>([]);
   const [showVariantPicker, setShowVariantPicker] = useState(false);
   const { lists, activeScanListId } = useScanContext();
-  const pulseAnim = useRef(new Animated.Value(1)).current;
   const [permission, requestPermission] = useCameraPermissions!();
   const activeList = lists.find((l) => l.id === activeScanListId);
   const filterCount = activeFilterCount(filters);
 
   const filtersRef = useRef<ScanFilters>(EMPTY_FILTERS);
-  useEffect(() => { filtersRef.current = filters; }, [filters]);
-
-  const scanStateRef = useRef<ScanState>("idle");
-  const showResultRef = useRef(false);
-  const showVariantPickerRef = useRef(false);
-  const inflightRef = useRef(false);
-  const backoffUntilRef = useRef<number>(0);
-
   const [frameLayout, setFrameLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const frameLayoutRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
-
-  useEffect(() => { scanStateRef.current = scanState; }, [scanState]);
-  useEffect(() => { showResultRef.current = showResult; }, [showResult]);
-  useEffect(() => { showVariantPickerRef.current = showVariantPicker; }, [showVariantPicker]);
-
-  const startPulse = () => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.06, duration: 700, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
-      ])
-    ).start();
-  };
-
-  const stopPulse = () => {
-    pulseAnim.stopAnimation();
-    pulseAnim.setValue(1);
-  };
 
   const handleFrameLayout = useCallback((e: any) => {
     const node = e.target ?? e.nativeEvent?.target;
@@ -445,43 +421,25 @@ function NativeScannerScreen() {
     }
   }, []);
 
-  const runIdentify = useCallback(async (uri: string, auto = false) => {
+  const runIdentify = useCallback(async (uri: string) => {
     setScanState("scanning");
     setErrorMsg("");
-    startPulse();
     try {
       const result = await identifyCard(uri, filtersRef.current);
       if (result.type === "variants") {
         setVariantCards(result.cards);
         setShowVariantPicker(true);
         setScanState("idle");
-        stopPulse();
-        inflightRef.current = false;
         return;
       }
-      const card = result.card;
-      if (auto && typeof card.confidence === "number" && card.confidence < CONFIDENCE_THRESHOLD) {
-        backoffUntilRef.current = Date.now() + AUTO_SCAN_BACKOFF_MS;
-        setScanState("idle");
-        return;
-      }
-      setResultCard(card);
+      setResultCard(result.card);
       setShowResult(true);
       setScanState("success");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err: unknown) {
-      console.warn("[runIdentify] error:", err);
-      if (auto) {
-        backoffUntilRef.current = Date.now() + AUTO_SCAN_BACKOFF_MS;
-        setScanState("idle");
-      } else {
-        setErrorMsg(err instanceof Error ? err.message : "Failed to identify card");
-        setScanState("error");
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      }
-    } finally {
-      stopPulse();
-      inflightRef.current = false;
+      setErrorMsg(err instanceof Error ? err.message : "Failed to identify card");
+      setScanState("error");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
   }, []);
 
@@ -498,42 +456,7 @@ function NativeScannerScreen() {
     setShowVariantPicker(false);
     setVariantCards([]);
     setScanState("idle");
-    backoffUntilRef.current = 0;
   };
-
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      if (showResultRef.current) return;
-      if (showVariantPickerRef.current) return;
-      if (scanStateRef.current !== "idle") return;
-      if (inflightRef.current) return;
-      if (Date.now() < backoffUntilRef.current) return;
-      if (!cameraRef.current) return;
-      if (!frameLayoutRef.current) return;
-
-      inflightRef.current = true;
-      try {
-        const photo = await (cameraRef.current as any).takePictureAsync({
-          quality: 0.9,
-          base64: false,
-          skipProcessing: true,
-        }).catch((err: unknown) => {
-          console.warn("[auto-scan] takePictureAsync failed:", err);
-          return null;
-        });
-        if (!photo?.uri || !photo?.width || !photo?.height) {
-          inflightRef.current = false;
-          return;
-        }
-        const cropped = await cropToFrame(photo.uri, photo.width, photo.height, frameLayoutRef.current);
-        await runIdentify(cropped, true);
-      } catch (err) {
-        console.warn("[auto-scan] unexpected error:", err);
-        inflightRef.current = false;
-      }
-    }, AUTO_SCAN_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [runIdentify]);
 
   const handleCapture = async () => {
     if (scanState === "scanning" || !cameraRef.current) return;
@@ -545,7 +468,7 @@ function NativeScannerScreen() {
       const uri = frame && photo.width && photo.height
         ? await cropToFrame(photo.uri, photo.width, photo.height, frame)
         : photo.uri;
-      await runIdentify(uri, false);
+      await runIdentify(uri);
     } catch (err) {
       console.warn("[handleCapture] error:", err);
       setScanState("error");
@@ -555,7 +478,7 @@ function NativeScannerScreen() {
 
   const handleUpload = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: "images", quality: 0.85 });
-    if (!result.canceled && result.assets[0]) await runIdentify(result.assets[0].uri, false);
+    if (!result.canceled && result.assets[0]) await runIdentify(result.assets[0].uri);
   };
 
   const handleScanAgain = () => {
@@ -563,7 +486,6 @@ function NativeScannerScreen() {
     setResultCard(null);
     setScanState("idle");
     setErrorMsg("");
-    backoffUntilRef.current = 0;
   };
 
   if (!permission) {
@@ -635,24 +557,24 @@ function NativeScannerScreen() {
         </View>
       )}
 
-      <View style={styles.frameOverlay} pointerEvents="none">
-        <Animated.View
-          style={[styles.scanBox, { transform: [{ scale: pulseAnim }] }]}
+      <View style={[styles.frameOverlay, { marginTop: FRAME_OFFSET_Y }]} pointerEvents="none">
+        <View
+          style={[styles.scanBox]}
           onLayout={handleFrameLayout}
         >
           <View style={[styles.corner, styles.cornerTL, { borderColor: colors.accent }]} />
           <View style={[styles.corner, styles.cornerTR, { borderColor: colors.accent }]} />
           <View style={[styles.corner, styles.cornerBL, { borderColor: colors.accent }]} />
           <View style={[styles.corner, styles.cornerBR, { borderColor: colors.accent }]} />
-        </Animated.View>
+        </View>
         <Text style={styles.nativeHint}>
-          {scanState === "scanning" ? "Identifying" :
+          {scanState === "scanning" ? "Identifying…" :
             scanState === "error" ? errorMsg :
-            "Hold card steady \u2014 scanning automatically"}
+            "Tap the button to scan"}
         </Text>
       </View>
 
-      <View style={[styles.nativeBottom, { paddingBottom: insets.bottom + 90 }]}>
+      <View style={[styles.nativeBottom, { paddingBottom: insets.bottom + 32 }]}>
         <Pressable style={styles.nativeUpload} onPress={handleUpload} disabled={scanState === "scanning"}>
           <Ionicons name="image-outline" size={22} color="rgba(255,255,255,0.7)" />
         </Pressable>
@@ -697,50 +619,6 @@ function NativeScannerScreen() {
   );
 }
 
-// ─── Active filter pills ──────────────────────────────────────────────────────
-function ActiveFilterPills({
-  filters,
-  colors,
-  dark,
-  onClear,
-}: {
-  filters: ScanFilters;
-  colors: any;
-  dark?: boolean;
-  onClear: (key: keyof ScanFilters) => void;
-}) {
-  const pills: { key: keyof ScanFilters; label: string }[] = [];
-  if (filters.game)     pills.push({ key: "game",     label: filters.game });
-  if (filters.set)      pills.push({ key: "set",      label: filters.set });
-  if (filters.language) pills.push({ key: "language", label: filters.language });
-  if (filters.finish)   pills.push({ key: "finish",   label: filters.finish });
-
-  return (
-    <View style={pillStyles.row}>
-      {pills.map(({ key, label }) => (
-        <Pressable
-          key={key}
-          style={[
-            pillStyles.pill,
-            dark
-              ? { backgroundColor: "rgba(255,255,255,0.18)" }
-              : { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 },
-          ]}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            onClear(key);
-          }}
-        >
-          <Text style={[pillStyles.pillText, { color: dark ? "#fff" : colors.foreground }]}>
-            {label}
-          </Text>
-          <Ionicons name="close" size={11} color={dark ? "rgba(255,255,255,0.7)" : colors.mutedForeground} />
-        </Pressable>
-      ))}
-    </View>
-  );
-}
-
 export default function ScannerScreen() {
   if (Platform.OS === "web") return <WebScannerScreen />;
   return <NativeScannerScreen />;
@@ -749,21 +627,8 @@ export default function ScannerScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16, paddingHorizontal: 32 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 20 },
-  headerTitle: { fontSize: 26, fontFamily: "Poppins_700Bold" },
   headerRight: { flexDirection: "row", alignItems: "center", gap: 10 },
-  listBadge: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5 },
-  listBadgeText: { fontSize: 12, fontFamily: "Poppins_600SemiBold" },
   listDot: { width: 8, height: 8, borderRadius: 4 },
-  scanArea: { flex: 1, alignItems: "center", justifyContent: "center" },
-  cardFrame: { width: FRAME_W, height: FRAME_H, borderRadius: 16, borderWidth: 1, alignItems: "center", justifyContent: "center", gap: 14, position: "relative" },
-  cameraIcon: { width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center" },
-  frameHint: { fontSize: 13, fontFamily: "Poppins_400Regular", textAlign: "center", paddingHorizontal: 24 },
-  actions: { paddingHorizontal: 24, paddingTop: 20, gap: 10 },
-  captureBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 16, borderRadius: 16, gap: 10 },
-  captureBtnText: { fontSize: 16, fontFamily: "Poppins_600SemiBold" },
-  uploadBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 13, borderRadius: 16, gap: 8, borderWidth: 1 },
-  uploadBtnText: { fontSize: 14, fontFamily: "Poppins_500Medium" },
   dimRegion: { position: "absolute", backgroundColor: "rgba(0,0,0,0.55)" },
   nativeHeader: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 12, zIndex: 10 },
   nativeHeaderTitle: { color: "#fff", fontSize: 22, fontFamily: "Poppins_700Bold" },

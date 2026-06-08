@@ -34,6 +34,10 @@ export default function RootLayout() {
     Poppins_500Medium,
     Poppins_600SemiBold,
     Poppins_700Bold,
+    // Ionicons font must be explicitly loaded on web — Expo does not bundle
+    // @expo/vector-icons fonts automatically for web exports.
+    // Without this, all Ionicons render as invisible blank squares.
+    IoniconsTTF: require("@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf"),
   });
 
   useEffect(() => {

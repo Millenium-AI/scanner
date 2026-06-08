@@ -5,7 +5,8 @@
  * • Streams to a <video> element that fills the scan frame
  * • Exposes `captureFrame()` which resolves to a base64 JPEG data-URI
  * • Handles permission denial gracefully
- * • Renders the 4-corner bracket overlay + dim background matching the native build
+ * • Renders the 4-corner bracket overlay + dim background
+ * • frameOffsetY shifts the frame up/down from center (negative = up)
  */
 
 import React, {
@@ -22,9 +23,10 @@ export interface WebCameraScannerHandle {
 }
 
 interface Props {
-  /** Must match the FRAME_W / FRAME_H constants in index.tsx (300 × 420) */
   frameWidth?: number;
   frameHeight?: number;
+  /** Vertical offset from center in px. Negative shifts the frame up. */
+  frameOffsetY?: number;
   accentColor?: string;
   onPermissionDenied?: () => void;
 }
@@ -37,6 +39,7 @@ const WebCameraScanner = forwardRef<WebCameraScannerHandle, Props>(
     {
       frameWidth = 300,
       frameHeight = 420,
+      frameOffsetY = 0,
       accentColor = '#6EE7B7',
       onPermissionDenied,
     },
@@ -112,15 +115,13 @@ const WebCameraScanner = forwardRef<WebCameraScannerHandle, Props>(
       },
     }));
 
-    // Dim regions: top / bottom / left / right around the frame
-    const dimTop    = (SCREEN_H - frameHeight) / 2;
-    const dimLeft   = (SCREEN_W - frameWidth)  / 2;
+    // Frame centered horizontally, shifted vertically by frameOffsetY
+    const frameTop  = (SCREEN_H - frameHeight) / 2 + frameOffsetY;
+    const frameLeft = (SCREEN_W - frameWidth)  / 2;
 
     return (
-      // Outer container fills the whole screen (caller passes SCREEN_W / SCREEN_H)
       <View style={[styles.fullScreen, { width: SCREEN_W, height: SCREEN_H }]}>
-
-        {/* Live video fills the whole screen */}
+        {/* Live video */}
         {/* @ts-ignore — HTMLVideoElement is web-only */}
         <video
           ref={videoRef as React.Ref<HTMLVideoElement>}
@@ -136,28 +137,23 @@ const WebCameraScanner = forwardRef<WebCameraScannerHandle, Props>(
           autoPlay
         />
 
-        {/* ── Dim overlay — 4 panels around the 300×420 frame ── */}
+        {/* Dim overlay — 4 panels around the frame */}
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
           {/* Top */}
-          <View style={[styles.dim, { top: 0, left: 0, right: 0, height: dimTop }]} />
+          <View style={[styles.dim, { top: 0, left: 0, right: 0, height: frameTop }]} />
           {/* Bottom */}
-          <View style={[styles.dim, { top: dimTop + frameHeight, left: 0, right: 0, bottom: 0 }]} />
+          <View style={[styles.dim, { top: frameTop + frameHeight, left: 0, right: 0, bottom: 0 }]} />
           {/* Left */}
-          <View style={[styles.dim, { top: dimTop, left: 0, width: dimLeft, height: frameHeight }]} />
+          <View style={[styles.dim, { top: frameTop, left: 0, width: frameLeft, height: frameHeight }]} />
           {/* Right */}
-          <View style={[styles.dim, { top: dimTop, left: dimLeft + frameWidth, right: 0, height: frameHeight }]} />
+          <View style={[styles.dim, { top: frameTop, left: frameLeft + frameWidth, right: 0, height: frameHeight }]} />
         </View>
 
-        {/* ── 4-corner bracket overlay ── */}
+        {/* 4-corner bracket */}
         <View
           style={[
             styles.frameBox,
-            {
-              width: frameWidth,
-              height: frameHeight,
-              top: dimTop,
-              left: dimLeft,
-            },
+            { width: frameWidth, height: frameHeight, top: frameTop, left: frameLeft },
           ]}
           pointerEvents="none"
         >
@@ -200,51 +196,14 @@ const CORNER_THICKNESS = 3;
 const CORNER_RADIUS = 6;
 
 const styles = StyleSheet.create({
-  fullScreen: {
-    position: 'relative',
-    backgroundColor: '#000',
-  },
-  dim: {
-    position: 'absolute',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  frameBox: {
-    position: 'absolute',
-  },
-  corner: {
-    position: 'absolute',
-    width: CORNER_SIZE,
-    height: CORNER_SIZE,
-    borderWidth: CORNER_THICKNESS,
-  },
-  cornerTL: {
-    top: 0,
-    left: 0,
-    borderRightWidth: 0,
-    borderBottomWidth: 0,
-    borderTopLeftRadius: CORNER_RADIUS,
-  },
-  cornerTR: {
-    top: 0,
-    right: 0,
-    borderLeftWidth: 0,
-    borderBottomWidth: 0,
-    borderTopRightRadius: CORNER_RADIUS,
-  },
-  cornerBL: {
-    bottom: 0,
-    left: 0,
-    borderRightWidth: 0,
-    borderTopWidth: 0,
-    borderBottomLeftRadius: CORNER_RADIUS,
-  },
-  cornerBR: {
-    bottom: 0,
-    right: 0,
-    borderLeftWidth: 0,
-    borderTopWidth: 0,
-    borderBottomRightRadius: CORNER_RADIUS,
-  },
+  fullScreen: { position: 'relative', backgroundColor: '#000' },
+  dim: { position: 'absolute', backgroundColor: 'rgba(0,0,0,0.55)' },
+  frameBox: { position: 'absolute' },
+  corner: { position: 'absolute', width: CORNER_SIZE, height: CORNER_SIZE, borderWidth: CORNER_THICKNESS },
+  cornerTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: CORNER_RADIUS },
+  cornerTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: CORNER_RADIUS },
+  cornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: CORNER_RADIUS },
+  cornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: CORNER_RADIUS },
   statusOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.65)',
@@ -253,10 +212,5 @@ const styles = StyleSheet.create({
     gap: 10,
     padding: 24,
   },
-  statusText: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 13,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
+  statusText: { color: 'rgba(255,255,255,0.85)', fontSize: 13, textAlign: 'center', lineHeight: 20 },
 });
