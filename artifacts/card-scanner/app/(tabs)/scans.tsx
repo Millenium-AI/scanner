@@ -122,6 +122,7 @@ export default function ScansScreen() {
   const [showListDrop, setShowListDrop] = useState(false);
   const [selectedCard, setSelectedCard] = useState<ScanItem | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
+  const [search, setSearch] = useState("");
 
   const selectedList = lists.find((l) => l.id === selectedListId) ?? lists[0];
   const listScans = useMemo(
@@ -185,12 +186,40 @@ export default function ScansScreen() {
         </View>
       </View>
 
+      {/* Stats + filter — mirrors Collection tab */}
+      <View style={styles.statsRow}>
+        <View style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.statValue, { color: colors.accent }]}>{listScans.length}</Text>
+          <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Cards</Text>
+        </View>
+        <View style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.statValue, { color: colors.accent }]}>${totalValue.toFixed(0)}</Text>
+          <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Value</Text>
+        </View>
+      </View>
+
+      <View style={[styles.searchRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Icon name="search-outline" size={16} color={colors.mutedForeground} />
+        <TextInput
+          style={[styles.searchInput, { color: colors.foreground }]}
+          placeholder="Filter cards…"
+          placeholderTextColor={colors.mutedForeground}
+          value={search}
+          onChangeText={setSearch}
+        />
+        {search.length > 0 && (
+          <Pressable onPress={() => setSearch("")}>
+            <Icon name="close-circle" size={16} color={colors.mutedForeground} />
+          </Pressable>
+        )}
+      </View>
+
       {listScans.length > 0 && (
         <TradeCalculator totalValue={totalValue} colors={colors} />
       )}
 
       <FlatList
-        data={listScans}
+        data={search.trim() ? listScans.filter(s => s.card.name?.toLowerCase().includes(search.toLowerCase()) || s.card.setName?.toLowerCase().includes(search.toLowerCase())) : listScans}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <CardListItem
@@ -297,6 +326,12 @@ export default function ScansScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 12 },
+  statsRow: { flexDirection: "row", gap: 10, paddingHorizontal: 16, marginBottom: 10 },
+  statCard: { flex: 1, borderRadius: 14, borderWidth: 1, paddingVertical: 12, alignItems: "center", gap: 2 },
+  statValue: { fontSize: 20, fontFamily: "Poppins_700Bold" },
+  statLabel: { fontSize: 11, fontFamily: "Poppins_500Medium" },
+  searchRow: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 16, marginBottom: 10, borderRadius: 14, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 10 },
+  searchInput: { flex: 1, fontSize: 15, fontFamily: "Poppins_400Regular" },
   title: { fontSize: 26, fontFamily: "Poppins_700Bold" },
   newBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
   newBtnText: { fontSize: 13, fontFamily: "Poppins_600SemiBold" },
