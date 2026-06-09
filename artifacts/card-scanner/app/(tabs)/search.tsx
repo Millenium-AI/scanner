@@ -82,7 +82,8 @@ export default function SearchScreen() {
 
   const hasActiveFilters = rarityFilter !== null || maxPrice.trim().length > 0;
 
-  const bottomPad = Math.max(insets.bottom, 20) + 49 + 16;
+  const TAB_BAR_H = 49;
+  const bottomPad = insets.bottom + TAB_BAR_H + 16;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -295,7 +296,7 @@ export default function SearchScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, overflow: "hidden" },
+  container: { flex: 1 },
   header: { paddingHorizontal: 20, paddingBottom: 12, gap: 12 },
   title: { fontSize: 26, fontFamily: "Poppins_700Bold" },
   searchRow: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 14, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 10 },

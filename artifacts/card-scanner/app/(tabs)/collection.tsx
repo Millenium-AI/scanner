@@ -23,10 +23,8 @@ export default function CollectionScreen() {
   const [selectedCard, setSelectedCard] = useState<any | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
 
-  const WEB_HOME_INDICATOR_H = 20;
   const TAB_BAR_H = 49;
-  const bottomInset = Math.max(insets.bottom, WEB_HOME_INDICATOR_H);
-  const bottomPad = bottomInset + TAB_BAR_H + 16;
+  const bottomPad = insets.bottom + TAB_BAR_H + 16;
 
   const uniqueCards = useMemo(() => {
     const map = new Map<string, { card: any; qty: number; scanId: string }>();
@@ -165,7 +163,7 @@ export default function CollectionScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, overflow: "hidden" },
+  container: { flex: 1 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingBottom: 12 },
   title: { fontSize: 26, fontFamily: "Poppins_700Bold" },
   statsRow: { flexDirection: "row", gap: 10, paddingHorizontal: 16, marginBottom: 12 },
@@ -186,7 +184,7 @@ const styles = StyleSheet.create({
   qtyRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   qtyBtn: { width: 26, height: 26, borderRadius: 13, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   qtyText: { fontSize: 13, fontFamily: "Poppins_500Medium" },
-  empty: { alignItems: "center", paddingTop: 80, gap: 12 },
+  empty: { alignItems: "center", justifyContent: "center", gap: 12, paddingTop: 60, paddingHorizontal: 32 },
   emptyTitle: { fontSize: 17, fontFamily: "Poppins_600SemiBold" },
   emptySub: { fontSize: 14, fontFamily: "Poppins_400Regular", textAlign: "center" },
 });
