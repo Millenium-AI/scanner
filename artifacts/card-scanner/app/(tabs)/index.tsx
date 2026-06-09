@@ -56,13 +56,12 @@ const SCREEN_H = Dimensions.get("window").height;
 const FRAME_W = SCREEN_W * 0.82;
 const FRAME_H = FRAME_W * 1.4; // trading card aspect ratio ~1:1.4
 
-// Header height (title bar) + tab bar height used for centering the frame
-const HEADER_H = 88; // safe-area top + title row
+// Header height (title row only — no safe-area top padding, flows under status bar)
+const HEADER_H = 52;
 const TAB_BAR_H = 49;
 
-// On web/PWA, CSS env(safe-area-inset-top) isn't always picked up by
-// react-native-safe-area-context. We use a sensible fallback.
-const WEB_STATUS_BAR_H = 44;
+// Small buffer above header buttons so they don't sit flush against the status bar
+const BUTTON_BUFFER = 6;
 
 async function cropToFrame(
   photoUri: string,
@@ -184,9 +183,11 @@ function WebScannerScreen() {
   const filterCount = activeFilterCount(filters);
   const filtersRef = useRef<ScanFilters>(EMPTY_FILTERS);
 
-  // On web PWA, insets.top may be 0 — use CSS env() fallback via a minimum
-  const topInset = Math.max(insets.top, WEB_STATUS_BAR_H);
-  const headerH = topInset + 52; // status bar + title row
+  // Use insets.top directly — on iOS PWA this is 0, which is intentional.
+  // The app flows naturally under the status bar (no white bar).
+  // BUTTON_BUFFER provides a small gap so header buttons aren't flush with the top edge.
+  const topInset = insets.top;
+  const headerH = topInset + HEADER_H + BUTTON_BUFFER;
   const bottomPad = insets.bottom + TAB_BAR_H + 16;
 
   // Vertically center the frame in the usable viewport between header and bottom controls
@@ -248,8 +249,8 @@ function WebScannerScreen() {
         )}
       </View>
 
-      {/* Header — sits above camera, safe area aware */}
-      <View style={[styles.nativeHeader, { paddingTop: topInset + 8 }]}>
+      {/* Header — flows under status bar, BUTTON_BUFFER ensures buttons clear the top edge */}
+      <View style={[styles.nativeHeader, { paddingTop: HEADER_H + BUTTON_BUFFER }]}>
         <Text style={styles.nativeHeaderTitle}>Scan Card</Text>
         <View style={styles.headerRight}>
           <FilterIconButton count={filterCount} onPress={() => setShowFilters(true)} colors={colors} dark />
@@ -262,7 +263,7 @@ function WebScannerScreen() {
       </View>
 
       {filterCount > 0 && !cameraDenied && (
-        <View style={[styles.nativeFilterPills, { top: topInset + 60 }]}>
+        <View style={[styles.nativeFilterPills, { top: HEADER_H + BUTTON_BUFFER + 48 }]}>
           <ActiveFilterPills filters={filters} colors={colors} dark onClear={(key) => setFilters(f => ({ ...f, [key]: null }))} />
         </View>
       )}
@@ -515,9 +516,7 @@ const styles = StyleSheet.create({
   nativeHeaderTitle: { color: "#fff", fontSize: 22, fontFamily: "Poppins_700Bold" },
   listBadgeDark: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.12)" },
   listBadgeDarkText: { color: "rgba(255,255,255,0.9)", fontSize: 12, fontFamily: "Poppins_600SemiBold" },
-  // Native: frame centered using flexbox in absolute fill
   frameOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 20, pointerEvents: "none" as "none" },
-  // Web: frame absolutely positioned via computed top/left
   scanBox: { width: FRAME_W, height: FRAME_H, position: "relative" },
   hintRow: { position: "absolute", left: 0, right: 0, alignItems: "center" },
   nativeHint: { color: "rgba(255,255,255,0.85)", fontSize: 13, fontFamily: "Poppins_400Regular", textAlign: "center", paddingHorizontal: 40 },
