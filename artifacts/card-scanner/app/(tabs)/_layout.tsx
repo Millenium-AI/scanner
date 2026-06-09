@@ -33,7 +33,7 @@ if (Platform.OS !== "web") {
 function NativeTabLayout() {
   if (!NativeTabs) return null;
   return (
-    <NativeTabs>
+    <NativeTabs initialRouteName="camera">
       <NativeTabs.Trigger name="list">
         <NativeTabsIcon sf={{ default: "list.bullet.rectangle", selected: "list.bullet.rectangle.fill" }} />
         <NativeTabsLabel>Lists</NativeTabsLabel>
@@ -71,6 +71,7 @@ function ClassicTabLayout() {
 
   return (
     <Tabs
+      initialRouteName="camera"
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.accent,

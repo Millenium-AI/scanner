@@ -115,7 +115,7 @@ function TradeCalculator({ totalValue, colors }: { totalValue: number; colors: a
 export default function ScansScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { lists, scans, selectedListId, setSelectedListId, removeFromList, createList, deleteList } = useScanContext();
+  const { lists, scans, activeScanListId, setActiveScanListId, removeScan, createList, deleteList } = useScanContext();
   const [showNewListDialog, setShowNewListDialog] = useState(false);
   const [newListName, setNewListName] = useState("");
   const [newListColor, setNewListColor] = useState(LIST_COLORS[0]);
@@ -123,7 +123,7 @@ export default function ScansScreen() {
   const [selectedCard, setSelectedCard] = useState<ScanItem | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
 
-  const selectedList = lists.find((l) => l.id === selectedListId) ?? lists[0];
+  const selectedList = lists.find((l) => l.id === activeScanListId) ?? lists[0];
   const listScans = useMemo(
     () => scans.filter((s) => s.listId === selectedList?.id),
     [scans, selectedList?.id]
@@ -198,7 +198,7 @@ export default function ScansScreen() {
             title={item.card.name}
             subtitle={formatDate(item.scannedAt)}
             onPress={() => { setSelectedCard(item); setDetailVisible(true); }}
-            onDelete={() => removeFromList(item.id)}
+            onDelete={() => removeScan(item.id)}
           />
         )}
         contentContainerStyle={[styles.listContent, { paddingBottom: bottomPad }]}
@@ -224,7 +224,7 @@ export default function ScansScreen() {
                     styles.dropItem,
                     list.id === selectedList?.id && { backgroundColor: colors.surface },
                   ]}
-                  onPress={() => { setSelectedListId(list.id); setShowListDrop(false); }}
+                  onPress={() => { setActiveScanListId(list.id); setShowListDrop(false); }}
                   onLongPress={() => handleDeleteList(list)}
                 >
                   <View style={[styles.dropDot, { backgroundColor: list.color }]} />
