@@ -1,1 +1,1 @@
-{{SCANS}}
+{{SCANS_CONTENT}}
