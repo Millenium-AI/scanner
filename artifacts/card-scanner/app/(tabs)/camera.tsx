@@ -243,7 +243,6 @@ function WebScannerScreen() {
       </View>
 
       <View style={[styles.nativeHeader, { paddingTop: insets.top + 12 }]}>
-        <Text style={styles.nativeHeaderTitle}>Scan Card</Text>
         <View style={styles.headerRight}>
           <FilterIconButton count={filterCount} onPress={() => setShowFilters(true)} colors={colors} dark />
           <Pressable style={styles.listBadgeDark} onPress={() => setShowListDrop(true)}>
