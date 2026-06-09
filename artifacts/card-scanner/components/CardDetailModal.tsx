@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as WebBrowser from "expo-web-browser";
@@ -15,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CardScanResult } from "@/context/ScanContext";
+import { Icon } from "@/components/Icon";
 import { useColors } from "@/hooks/useColors";
 
 interface CardDetailModalProps {
@@ -110,7 +110,7 @@ export function CardDetailModal({ card, visible, onClose, extraInfo }: CardDetai
           <View style={[styles.handle, { backgroundColor: colors.border }]} />
 
           <Pressable style={styles.closeBtn} onPress={onClose} hitSlop={12}>
-            <Ionicons name="close" size={20} color={colors.mutedForeground} />
+            <Icon name="close" size={20} color={colors.mutedForeground} />
           </Pressable>
 
           <ScrollView
@@ -130,7 +130,7 @@ export function CardDetailModal({ card, visible, onClose, extraInfo }: CardDetai
               </View>
             ) : (
               <View style={[styles.imagePlaceholder, { backgroundColor: colors.surface }]}>
-                <Ionicons name="image-outline" size={48} color={colors.mutedForeground} />
+                <Icon name="image-outline" size={48} color={colors.mutedForeground} />
               </View>
             )}
 
@@ -166,7 +166,7 @@ export function CardDetailModal({ card, visible, onClose, extraInfo }: CardDetai
                 style={[styles.actionBtn, { backgroundColor: "#1A56DB" }]}
                 onPress={() => openTCGPlayer(tcgUrl)}
               >
-                <Ionicons name="pricetag-outline" size={18} color="#fff" />
+                <Icon name="pricetag-outline" size={18} color="#fff" />
                 <Text style={styles.actionBtnText}>TCGPlayer</Text>
               </Pressable>
 
@@ -174,7 +174,7 @@ export function CardDetailModal({ card, visible, onClose, extraInfo }: CardDetai
                 style={[styles.actionBtn, { backgroundColor: "#E53238" }]}
                 onPress={() => openEbay(card)}
               >
-                <Ionicons name="cart-outline" size={18} color="#fff" />
+                <Icon name="cart-outline" size={18} color="#fff" />
                 <Text style={styles.actionBtnText}>eBay Sold</Text>
               </Pressable>
             </View>

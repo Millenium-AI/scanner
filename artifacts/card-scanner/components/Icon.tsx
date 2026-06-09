@@ -12,6 +12,7 @@ import {
   Camera,
   Check,
   ChevronDown,
+  ChevronRight,
   CirclePlus,
   CircleX,
   ExternalLink,
@@ -23,6 +24,7 @@ import {
   ScanSearch,
   Search,
   Settings2,
+  ShoppingCart,
   SlidersHorizontal,
   Store,
   Tag,
@@ -46,6 +48,7 @@ const MAP: Record<string, LucideIcon> = {
   "camera-outline":       Camera,
   "options-outline":      SlidersHorizontal,
   "chevron-down":         ChevronDown,
+  "chevron-forward":      ChevronRight,
   "checkmark":            Check,
   "close":                X,
   "image-outline":        Image,
@@ -68,6 +71,9 @@ const MAP: Record<string, LucideIcon> = {
   "remove":               Minus,
   "add":                  Plus,
   "trash-outline":        Trash2,
+
+  // Search / detail modals
+  "cart-outline":         ShoppingCart,
 
   // Search screen
   "alert-circle-outline": AlertCircle,

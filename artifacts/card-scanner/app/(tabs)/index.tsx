@@ -13,7 +13,6 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
 
 import { CardResultSheet } from "@/components/CardResultSheet";
 import { VariantPickerModal } from "@/components/VariantPickerModal";
@@ -24,6 +23,7 @@ import {
   activeFilterCount,
 } from "@/components/ScanFilterSheet";
 import { CardScanResult, useScanContext } from "@/context/ScanContext";
+import { Icon } from "@/components/Icon";
 import { useColors } from "@/hooks/useColors";
 import { identifyCard } from "@/services/cardScanService";
 import WebCameraScanner, {
@@ -105,7 +105,7 @@ function FilterIconButton({
       ]}
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
     >
-      <Ionicons name="options-outline" size={19} color={dark ? "rgba(255,255,255,0.85)" : colors.foreground} />
+      <Icon name="options-outline" size={19} color={dark ? "rgba(255,255,255,0.85)" : colors.foreground} />
       {count > 0 && (
         <View style={[fStyles.badge, { backgroundColor: colors.accent }]}>
           <Text style={[fStyles.badgeText, { color: colors.background }]}>{count}</Text>
@@ -132,7 +132,7 @@ function ListDropdown({ colors, onClose }: { colors: any; onClose: () => void })
               >
                 <View style={[ddStyles.dot, { backgroundColor: list.color }]} />
                 <Text style={[ddStyles.itemText, { color: active ? colors.foreground : colors.mutedForeground }]}>{list.name}</Text>
-                {active && <Ionicons name="checkmark" size={16} color={colors.accent} />}
+                {active && <Icon name="checkmark" size={16} color={colors.accent} />}
               </Pressable>
             );
           })}
@@ -159,7 +159,7 @@ function ActiveFilterPills({
           onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onClear(key); }}
         >
           <Text style={[pillStyles.pillText, { color: dark ? "#fff" : colors.foreground }]}>{label}</Text>
-          <Ionicons name="close" size={11} color={dark ? "rgba(255,255,255,0.7)" : colors.mutedForeground} />
+          <Icon name="close" size={11} color={dark ? "rgba(255,255,255,0.7)" : colors.mutedForeground} />
         </Pressable>
       ))}
     </View>
@@ -244,7 +244,7 @@ function WebScannerScreen() {
         ) : (
           <View style={[styles.centered, { backgroundColor: colors.background, flex: 1, paddingTop: topInset }]}>
             <View style={[styles.permIcon, { backgroundColor: colors.surface }]}>
-              <Ionicons name="camera-outline" size={40} color={colors.accent} />
+              <Icon name="camera-outline" size={40} color={colors.accent} />
             </View>
             <Text style={[styles.permTitle, { color: colors.foreground }]}>Camera Access Required</Text>
             <Text style={[styles.permSub, { color: colors.mutedForeground }]}>Allow camera access in your browser settings and reload.</Text>
@@ -263,7 +263,7 @@ function WebScannerScreen() {
           <Pressable style={styles.listBadgeDark} onPress={() => setShowListDrop(true)}>
             <View style={[styles.listDot, { backgroundColor: activeList?.color ?? colors.accent }]} />
             <Text style={styles.listBadgeDarkText}>{activeList?.name ?? "My Lists"}</Text>
-            <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.6)" />
+            <Icon name="chevron-down" size={12} color="rgba(255,255,255,0.6)" />
           </Pressable>
         </View>
       </View>
@@ -301,7 +301,7 @@ function WebScannerScreen() {
       {!cameraDenied && (
         <View style={[styles.nativeBottom, { paddingBottom: bottomPad }]}>
           <Pressable style={styles.nativeUpload} onPress={handleUpload} disabled={scanState === "scanning"}>
-            <Ionicons name="image-outline" size={22} color="rgba(255,255,255,0.7)" />
+            <Icon name="image-outline" size={22} color="rgba(255,255,255,0.7)" />
           </Pressable>
           <Pressable
             style={({ pressed }) => [styles.nativeCapture, { opacity: pressed || scanState === "scanning" ? 0.8 : 1 }]}
@@ -312,7 +312,7 @@ function WebScannerScreen() {
               <View style={[styles.nativeCaptureCore, { backgroundColor: colors.accent }]}>
                 {scanState === "scanning"
                   ? <ActivityIndicator color={colors.background} size="small" />
-                  : <Ionicons name="scan" size={26} color={colors.background} />
+                  : <Icon name="scan" size={26} color={colors.background} />
                 }
               </View>
             </View>
@@ -414,7 +414,7 @@ function NativeScannerScreen() {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background, paddingTop: insets.top }]}>
         <View style={[styles.permIcon, { backgroundColor: colors.surface }]}>
-          <Ionicons name="camera-outline" size={40} color={colors.accent} />
+          <Icon name="camera-outline" size={40} color={colors.accent} />
         </View>
         <Text style={[styles.permTitle, { color: colors.foreground }]}>Camera Access Required</Text>
         <Text style={[styles.permSub, { color: colors.mutedForeground }]}>Allow camera access to scan trading cards in real time</Text>
@@ -452,7 +452,7 @@ function NativeScannerScreen() {
           <Pressable style={styles.listBadgeDark} onPress={() => setShowListDrop(true)}>
             <View style={[styles.listDot, { backgroundColor: activeList?.color ?? colors.accent }]} />
             <Text style={styles.listBadgeDarkText}>{activeList?.name ?? "My Lists"}</Text>
-            <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.6)" />
+            <Icon name="chevron-down" size={12} color="rgba(255,255,255,0.6)" />
           </Pressable>
         </View>
       </View>
@@ -477,7 +477,7 @@ function NativeScannerScreen() {
 
       <View style={[styles.nativeBottom, { paddingBottom: bottomPad }]}>
         <Pressable style={styles.nativeUpload} onPress={handleUpload} disabled={scanState === "scanning"}>
-          <Ionicons name="image-outline" size={22} color="rgba(255,255,255,0.7)" />
+          <Icon name="image-outline" size={22} color="rgba(255,255,255,0.7)" />
         </Pressable>
         <Pressable
           style={({ pressed }) => [styles.nativeCapture, { opacity: pressed || scanState === "scanning" ? 0.8 : 1 }]}
@@ -486,12 +486,12 @@ function NativeScannerScreen() {
         >
           <View style={[styles.nativeCaptureRing, { borderColor: colors.accent }]}>
             <View style={[styles.nativeCaptureCore, { backgroundColor: colors.accent }]}>
-              {scanState === "scanning" ? <ActivityIndicator color={colors.background} size="small" /> : <Ionicons name="scan" size={26} color={colors.background} />}
+              {scanState === "scanning" ? <ActivityIndicator color={colors.background} size="small" /> : <Icon name="scan" size={26} color={colors.background} />}
             </View>
           </View>
         </Pressable>
         <Pressable style={styles.nativeUpload} onPress={() => setFlash(f => f === "off" ? "on" : "off")}>
-          <Ionicons name={flash === "on" ? "flash" : "flash-off"} size={22} color={flash === "on" ? colors.accent : "rgba(255,255,255,0.7)"} />
+          <Icon name={flash === "on" ? "flash" : "flash-off"} size={22} color={flash === "on" ? colors.accent : "rgba(255,255,255,0.7)"} />
         </Pressable>
       </View>
 
