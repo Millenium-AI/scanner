@@ -122,16 +122,45 @@ export default function ScansScreen() {
   const [showListDrop, setShowListDrop] = useState(false);
   const [selectedCard, setSelectedCard] = useState<ScanItem | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
+  const [search, setSearch] = useState("");
 
   const selectedList = lists.find((l) => l.id === activeScanListId) ?? lists[0];
   const listScans = useMemo(
     () => scans.filter((s) => s.listId === selectedList?.id),
     [scans, selectedList?.id]
   );
+
+  // ── Stats (scoped to current list) ──────────────────────────────────────
+  const uniqueCards = useMemo(() => {
+    const map = new Map<string, { scan: ScanItem; qty: number }>();
+    for (const s of listScans) {
+      const key = s.card.cardId;
+      if (map.has(key)) {
+        map.get(key)!.qty += 1;
+      } else {
+        map.set(key, { scan: s, qty: 1 });
+      }
+    }
+    return Array.from(map.values());
+  }, [listScans]);
+
+  const totalCards = listScans.length;
+  const uniqueCount = uniqueCards.length;
   const totalValue = useMemo(
     () => listScans.reduce((sum, s) => sum + (s.card.marketPrice ?? 0), 0),
     [listScans]
   );
+
+  // ── Search filter ────────────────────────────────────────────────────────
+  const filtered = useMemo(() => {
+    if (!search.trim()) return listScans;
+    const q = search.toLowerCase();
+    return listScans.filter(
+      (s) =>
+        s.card.name?.toLowerCase().includes(q) ||
+        s.card.set?.toLowerCase().includes(q)
+    );
+  }, [listScans, search]);
 
   const formatDate = (iso: string) => {
     const d = new Date(iso);
@@ -164,6 +193,7 @@ export default function ScansScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* ── Header: New btn + List dropdown ── */}
       <View style={[styles.headerRow, { paddingTop: insets.top + 12 }]}>
         <Text style={[styles.title, { color: colors.accent }]}>Lists</Text>
         <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
@@ -185,12 +215,46 @@ export default function ScansScreen() {
         </View>
       </View>
 
+      {/* ── Stats row: Cards | Unique | Value ── */}
+      <View style={styles.statsRow}>
+        <View style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.statValue, { color: colors.accent }]}>{totalCards}</Text>
+          <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Cards</Text>
+        </View>
+        <View style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.statValue, { color: colors.accent }]}>{uniqueCount}</Text>
+          <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Unique</Text>
+        </View>
+        <View style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.statValue, { color: colors.accent }]}>${totalValue.toFixed(0)}</Text>
+          <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Value</Text>
+        </View>
+      </View>
+
+      {/* ── Search bar ── */}
+      <View style={[styles.searchRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Icon name="search-outline" size={16} color={colors.mutedForeground} />
+        <TextInput
+          style={[styles.searchInput, { color: colors.foreground }]}
+          placeholder="Search Cards…"
+          placeholderTextColor={colors.mutedForeground}
+          value={search}
+          onChangeText={setSearch}
+        />
+        {search.length > 0 && (
+          <Pressable onPress={() => setSearch("")}>
+            <Icon name="close-circle" size={16} color={colors.mutedForeground} />
+          </Pressable>
+        )}
+      </View>
+
+      {/* ── Trade calculator (existing, shown when list has cards) ── */}
       {listScans.length > 0 && (
         <TradeCalculator totalValue={totalValue} colors={colors} />
       )}
 
       <FlatList
-        data={listScans}
+        data={filtered}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <CardListItem
@@ -205,13 +269,17 @@ export default function ScansScreen() {
         ListEmptyComponent={
           <View style={styles.empty}>
             <Icon name="albums-outline" size={48} color={colors.mutedForeground} />
-            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No scans in this list</Text>
-            <Text style={[styles.emptySub, { color: colors.mutedForeground }]}>Go to the Scan tab to add cards</Text>
+            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
+              {search.trim() ? "No matching cards" : "No scans in this list"}
+            </Text>
+            <Text style={[styles.emptySub, { color: colors.mutedForeground }]}>
+              {search.trim() ? "Try a different search term" : "Go to the Scan tab to add cards"}
+            </Text>
           </View>
         }
       />
 
-      {/* List picker dropdown */}
+      {/* ── List picker dropdown ── */}
       {showListDrop && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowListDrop(false)}>
           <Pressable style={styles.dropOverlay} onPress={() => setShowListDrop(false)}>
@@ -237,7 +305,7 @@ export default function ScansScreen() {
         </Modal>
       )}
 
-      {/* New list dialog */}
+      {/* ── New list dialog ── */}
       {showNewListDialog && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowNewListDialog(false)}>
           <Pressable style={styles.dropOverlay} onPress={() => setShowNewListDialog(false)}>
@@ -303,6 +371,15 @@ const styles = StyleSheet.create({
   dropdownBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, maxWidth: 140 },
   dropDot: { width: 8, height: 8, borderRadius: 4 },
   dropdownLabel: { flex: 1, fontSize: 15, fontFamily: "Poppins_600SemiBold" },
+  // Stats
+  statsRow: { flexDirection: "row", gap: 10, paddingHorizontal: 16, marginBottom: 12 },
+  statCard: { flex: 1, borderRadius: 14, borderWidth: 1, paddingVertical: 12, alignItems: "center", gap: 2 },
+  statValue: { fontSize: 20, fontFamily: "Poppins_700Bold" },
+  statLabel: { fontSize: 11, fontFamily: "Poppins_500Medium" },
+  // Search
+  searchRow: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 16, marginBottom: 12, borderRadius: 14, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 10 },
+  searchInput: { flex: 1, fontSize: 15, fontFamily: "Poppins_400Regular" },
+  // List
   listContent: { paddingHorizontal: 16, paddingTop: 4 },
   empty: { alignItems: "center", paddingTop: 80, gap: 12 },
   emptyTitle: { fontSize: 17, fontFamily: "Poppins_600SemiBold" },
