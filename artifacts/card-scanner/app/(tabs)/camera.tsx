@@ -1,11 +1,11 @@
 import * as Haptics from "expo-haptics";
 import { manipulateAsync } from "expo-image-manipulator";
-import * as MediaLibrary from "expo-media-library";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -88,9 +88,9 @@ function FilterPill({ label, active, dark, onPress }: { label: string; active: b
 function WebScanFallback() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { lists, selectedListId, setSelectedListId } = useScanContext();
+  const { lists, activeScanListId, setActiveScanListId } = useScanContext();
   const [listPickerVisible, setListPickerVisible] = useState(false);
-  const activeList = lists.find((l) => l.id === selectedListId) ?? lists[0];
+  const activeList = lists.find((l) => l.id === activeScanListId) ?? lists[0];
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -109,7 +109,7 @@ function WebScanFallback() {
       <ListPickerModal
         visible={listPickerVisible}
         onClose={() => setListPickerVisible(false)}
-        onSelect={(id) => { setSelectedListId(id); setListPickerVisible(false); }}
+        onSelect={(id) => { setActiveScanListId(id); setListPickerVisible(false); }}
       />
     </View>
   );
@@ -118,7 +118,7 @@ function WebScanFallback() {
 function NativeScanView() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { lists, selectedListId, setSelectedListId, addToList } = useScanContext();
+  const { lists, activeScanListId, setActiveScanListId, addScan } = useScanContext();
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<ScanPhase>("idle");
   const [resultCard, setResultCard] = useState<any | null>(null);
@@ -130,7 +130,7 @@ function NativeScanView() {
   const frameLayoutRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
   const bottomPad = Math.max(insets.bottom, WEB_HOME_INDICATOR_H) + TAB_BAR_H + 16;
-  const activeList = lists.find((l) => l.id === selectedListId) ?? lists[0];
+  const activeList = lists.find((l) => l.id === activeScanListId) ?? lists[0];
 
   const onFrameLayout = useCallback((e: any) => {
     e.target.measure((_x: number, _y: number, w: number, h: number, px: number, py: number) => {
@@ -270,20 +270,18 @@ function NativeScanView() {
           setResultCard(null);
         }}
         onAddToList={(listId) => {
-          if (resultCard) addToList(resultCard, listId);
+          if (resultCard) addScan(resultCard, listId);
         }}
       />
 
       <ListPickerModal
         visible={listPickerVisible}
         onClose={() => setListPickerVisible(false)}
-        onSelect={(id) => { setSelectedListId(id); setListPickerVisible(false); }}
+        onSelect={(id) => { setActiveScanListId(id); setListPickerVisible(false); }}
       />
     </View>
   );
 }
-
-import { Platform } from "react-native";
 
 export default function CameraScreen() {
   if (Platform.OS === "web") return <WebScanFallback />;
