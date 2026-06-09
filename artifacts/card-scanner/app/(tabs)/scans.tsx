@@ -204,6 +204,7 @@ export default function ScansScreen() {
         contentContainerStyle={[styles.listContent, { paddingBottom: bottomPad }]}
         ListEmptyComponent={
           <View style={styles.empty}>
+            <Icon name="albums-outline" size={48} color={colors.mutedForeground} />
             <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No scans in this list</Text>
             <Text style={[styles.emptySub, { color: colors.mutedForeground }]}>Go to the Scan tab to add cards</Text>
           </View>
