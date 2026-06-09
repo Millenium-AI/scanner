@@ -9,7 +9,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="theme-color" content="#0D1117" />
+    <meta name="theme-color" content="#0B0D17" />
 
     <title>CardScan</title>
     <link rel="manifest" href="/manifest.json" />
@@ -19,7 +19,7 @@
          including under the status bar and above the home indicator.
          env(safe-area-inset-*) ensures content isn't obscured by the notch/home bar. */
       html {
-        background: #0D1117;
+        background: #0B0D17;
         margin: 0;
         padding: 0;
         overscroll-behavior: none;
@@ -29,7 +29,7 @@
       }
 
       body {
-        background: #0D1117;
+        background: #0B0D17;
         margin: 0;
         padding: 0;
         /* Use logical viewport height — ignores Safari toolbar, fills full screen on PWA */
@@ -37,11 +37,8 @@
         width: 100lvw;
         overscroll-behavior: none;
         overflow: hidden;
-        /* Respect device safe areas (notch top, home indicator bottom) */
-        padding-top: env(safe-area-inset-top);
-        padding-right: env(safe-area-inset-right);
+        /* Bottom safe area only — top is handled per-page in JS via insets.top */
         padding-bottom: env(safe-area-inset-bottom);
-        padding-left: env(safe-area-inset-left);
         box-sizing: border-box;
       }
 
