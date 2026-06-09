@@ -100,7 +100,7 @@ function FilterIconButton({
       ]}
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
     >
-      <Icon name="options-outline" size={19} color={dark ? "rgba(255,255,255,0.85)" : colors.foreground} />
+      <Icon name="options-outline" size={22} color={dark ? "rgba(255,255,255,0.85)" : colors.foreground} />
       {count > 0 && (
         <View style={[fStyles.badge, { backgroundColor: colors.accent }]}>
           <Text style={[fStyles.badgeText, { color: colors.background }]}>{count}</Text>
@@ -248,7 +248,7 @@ function WebScannerScreen() {
           <Pressable style={styles.listBadgeDark} onPress={() => setShowListDrop(true)}>
             <View style={[styles.listDot, { backgroundColor: activeList?.color ?? colors.accent }]} />
             <Text style={styles.listBadgeDarkText}>{activeList?.name ?? "My Lists"}</Text>
-            <Icon name="chevron-down" size={12} color="rgba(255,255,255,0.6)" />
+            <Icon name="chevron-down" size={14} color="rgba(255,255,255,0.6)" />
           </Pressable>
         </View>
       </View>
@@ -434,7 +434,7 @@ function NativeScannerScreen() {
           <Pressable style={styles.listBadgeDark} onPress={() => setShowListDrop(true)}>
             <View style={[styles.listDot, { backgroundColor: activeList?.color ?? colors.accent }]} />
             <Text style={styles.listBadgeDarkText}>{activeList?.name ?? "My Lists"}</Text>
-            <Icon name="chevron-down" size={12} color="rgba(255,255,255,0.6)" />
+            <Icon name="chevron-down" size={14} color="rgba(255,255,255,0.6)" />
           </Pressable>
         </View>
       </View>
@@ -530,7 +530,7 @@ const styles = StyleSheet.create({
 });
 
 const fStyles = StyleSheet.create({
-  btn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  btn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   badge: { position: "absolute", top: -2, right: -2, width: 14, height: 14, borderRadius: 7, alignItems: "center", justifyContent: "center" },
   badgeText: { fontSize: 8, fontFamily: "Poppins_700Bold" },
 });
