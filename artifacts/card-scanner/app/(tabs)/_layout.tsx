@@ -34,11 +34,11 @@ function NativeTabLayout() {
   if (!NativeTabs) return null;
   return (
     <NativeTabs>
-      <NativeTabs.Trigger name="scans">
+      <NativeTabs.Trigger name="list">
         <NativeTabsIcon sf={{ default: "list.bullet.rectangle", selected: "list.bullet.rectangle.fill" }} />
         <NativeTabsLabel>Lists</NativeTabsLabel>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="index">
+      <NativeTabs.Trigger name="camera">
         <NativeTabsIcon sf={{ default: "camera.viewfinder", selected: "camera.viewfinder" }} />
         <NativeTabsLabel>Scan</NativeTabsLabel>
       </NativeTabs.Trigger>
@@ -94,7 +94,7 @@ function ClassicTabLayout() {
       }}
     >
       <Tabs.Screen
-        name="scans"
+        name="list"
         options={{
           title: "Lists",
           tabBarIcon: ({ color }) =>
@@ -104,7 +104,7 @@ function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen
-        name="index"
+        name="camera"
         options={{
           title: "Scan",
           tabBarIcon: ({ color }) =>
