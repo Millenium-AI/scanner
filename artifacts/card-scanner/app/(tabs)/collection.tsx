@@ -84,7 +84,7 @@ export default function CollectionScreen() {
         <Icon name="search-outline" size={16} color={colors.mutedForeground} />
         <TextInput
           style={[styles.searchInput, { color: colors.foreground }]}
-          placeholder="Filter cards…"
+          placeholder="Search Cards…"
           placeholderTextColor={colors.mutedForeground}
           value={search}
           onChangeText={setSearch}
