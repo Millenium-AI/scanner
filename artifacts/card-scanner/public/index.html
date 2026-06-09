@@ -13,11 +13,9 @@
 
     <title>CardScan</title>
     <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
 
     <style>
-      /* iOS PWA: use logical viewport units so the app fills the full screen
-         including under the status bar and above the home indicator.
-         env(safe-area-inset-*) ensures content isn't obscured by the notch/home bar. */
       html {
         background: #0B0D17;
         margin: 0;
@@ -32,12 +30,10 @@
         background: #0B0D17;
         margin: 0;
         padding: 0;
-        /* Use logical viewport height — ignores Safari toolbar, fills full screen on PWA */
         height: 100lvh;
         width: 100lvw;
         overscroll-behavior: none;
         overflow: hidden;
-        /* Bottom safe area only — top is handled per-page in JS via insets.top */
         padding-bottom: env(safe-area-inset-bottom);
         box-sizing: border-box;
       }

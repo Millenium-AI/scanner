@@ -2,7 +2,7 @@
   "name": "CardScan",
   "short_name": "CardScan",
   "description": "Scan and identify trading cards instantly",
-  "start_url": "/",
+  "start_url": "/camera",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
