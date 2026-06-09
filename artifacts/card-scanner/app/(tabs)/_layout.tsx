@@ -94,6 +94,7 @@ function ClassicTabLayout() {
         tabBarLabelStyle: { fontFamily: "Poppins_500Medium", fontSize: 11 },
       }}
     >
+      <Tabs.Screen name="index" options={{ href: null }} />
       <Tabs.Screen
         name="list"
         options={{
