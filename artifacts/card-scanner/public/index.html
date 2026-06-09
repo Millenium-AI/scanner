@@ -15,8 +15,10 @@
     <link rel="manifest" href="/manifest.json" />
 
     <style>
-      /* Kill all white flash / rubber-band areas */
-      html, body {
+      /* iOS PWA: use logical viewport units so the app fills the full screen
+         including under the status bar and above the home indicator.
+         env(safe-area-inset-*) ensures content isn't obscured by the notch/home bar. */
+      html {
         background: #0D1117;
         margin: 0;
         padding: 0;
@@ -25,6 +27,24 @@
         height: 100%;
         width: 100%;
       }
+
+      body {
+        background: #0D1117;
+        margin: 0;
+        padding: 0;
+        /* Use logical viewport height — ignores Safari toolbar, fills full screen on PWA */
+        height: 100lvh;
+        width: 100lvw;
+        overscroll-behavior: none;
+        overflow: hidden;
+        /* Respect device safe areas (notch top, home indicator bottom) */
+        padding-top: env(safe-area-inset-top);
+        padding-right: env(safe-area-inset-right);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        box-sizing: border-box;
+      }
+
       #root {
         height: 100%;
         width: 100%;
