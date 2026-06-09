@@ -59,7 +59,15 @@ function ClassicTabLayout() {
   const insets = useSafeAreaInsets();
   const isIOS = Platform.OS === "ios";
 
-  const tabBarHeight = 49 + insets.bottom;
+  // PWA-safe bottom inset — mirrors env(safe-area-inset-bottom) with a minimum floor
+  // on iOS PWA, insets.bottom returns 0 (known bug), so we force at least 20pt
+  const WEB_HOME_INDICATOR_H = 20;
+  const bottomInset =
+    Platform.OS === "web"
+      ? Math.max(insets.bottom, WEB_HOME_INDICATOR_H)
+      : insets.bottom;
+
+  const tabBarHeight = 49 + bottomInset;
 
   return (
     <Tabs
@@ -74,7 +82,7 @@ function ClassicTabLayout() {
           borderTopColor: colors.border,
           elevation: 0,
           height: tabBarHeight,
-          paddingBottom: insets.bottom,
+          paddingBottom: bottomInset,
         },
         tabBarBackground: () =>
           isIOS ? (
