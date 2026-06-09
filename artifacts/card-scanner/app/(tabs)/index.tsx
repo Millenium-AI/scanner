@@ -63,6 +63,9 @@ const TAB_BAR_H = 49;
 // Small buffer above header buttons so they don't sit flush against the status bar
 const BUTTON_BUFFER = 6;
 
+// Minimum bottom inset for iOS PWA where insets.bottom returns 0 (home indicator height)
+const WEB_HOME_INDICATOR_H = 20;
+
 async function cropToFrame(
   photoUri: string,
   photoWidth: number,
@@ -188,7 +191,10 @@ function WebScannerScreen() {
   // BUTTON_BUFFER provides a small gap so header buttons aren't flush with the top edge.
   const topInset = insets.top;
   const headerH = topInset + HEADER_H + BUTTON_BUFFER;
-  const bottomPad = insets.bottom + TAB_BAR_H + 16;
+
+  // On iOS PWA, insets.bottom returns 0 (bug) — force a minimum to clear the home indicator
+  const bottomInset = Math.max(insets.bottom, WEB_HOME_INDICATOR_H);
+  const bottomPad = bottomInset + TAB_BAR_H + 16;
 
   // Vertically center the frame in the usable viewport between header and bottom controls
   const usableH = SCREEN_H - headerH - (bottomPad + 80);
