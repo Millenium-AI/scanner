@@ -95,7 +95,7 @@ export default function SearchScreen() {
           <Icon name="search-outline" size={18} color={colors.mutedForeground} />
           <TextInput
             style={[styles.searchInput, { color: colors.foreground }]}
-            placeholder="Card name, set, number…"
+            placeholder="Card Name + Number and or Set Name for Best Results"
             placeholderTextColor={colors.mutedForeground}
             value={query}
             onChangeText={setQuery}
