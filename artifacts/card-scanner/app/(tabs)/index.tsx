@@ -54,14 +54,9 @@ const SCREEN_W = Dimensions.get("window").width;
 const SCREEN_H = Dimensions.get("window").height;
 
 const FRAME_W = SCREEN_W * 0.82;
-const FRAME_H = FRAME_W * 1.4; // trading card aspect ratio ~1:1.4
+const FRAME_H = FRAME_W * 1.4;
 
-// Header height (title row only — no safe-area top padding, flows under status bar)
-const HEADER_H = 52;
 const TAB_BAR_H = 49;
-
-// Small buffer above header buttons so they don't sit flush against the status bar
-const BUTTON_BUFFER = 6;
 
 // Minimum bottom inset for iOS PWA where insets.bottom returns 0 (home indicator height)
 const WEB_HOME_INDICATOR_H = 20;
@@ -186,19 +181,11 @@ function WebScannerScreen() {
   const filterCount = activeFilterCount(filters);
   const filtersRef = useRef<ScanFilters>(EMPTY_FILTERS);
 
-  // Use insets.top directly — on iOS PWA this is 0, which is intentional.
-  // The app flows naturally under the status bar (no white bar).
-  // BUTTON_BUFFER provides a small gap so header buttons aren't flush with the top edge.
-  const topInset = insets.top;
-  const headerH = topInset + HEADER_H + BUTTON_BUFFER;
-
-  // On iOS PWA, insets.bottom returns 0 (bug) — force a minimum to clear the home indicator
   const bottomInset = Math.max(insets.bottom, WEB_HOME_INDICATOR_H);
   const bottomPad = bottomInset + TAB_BAR_H + 16;
 
-  // Vertically center the frame in the usable viewport between header and bottom controls
-  const usableH = SCREEN_H - headerH - (bottomPad + 80);
-  const frameTop = headerH + (usableH - FRAME_H) / 2;
+  // Vertically center the frame between header bottom and bottom controls
+  const frameTop = insets.top + 12 + 52 + (SCREEN_H - (insets.top + 12 + 52) - (bottomPad + 80) - FRAME_H) / 2;
 
   const runIdentify = useCallback(async (uri: string) => {
     setScanState("scanning"); setErrorMsg("");
@@ -230,7 +217,7 @@ function WebScannerScreen() {
   const handleVariantCancel = () => { setShowVariantPicker(false); setVariantCards([]); setScanState("idle"); };
 
   return (
-    <View style={[styles.container, { backgroundColor: "#000" }]}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={StyleSheet.absoluteFill}>
         {!cameraDenied ? (
           <WebCameraScanner
@@ -242,7 +229,7 @@ function WebScannerScreen() {
             onPermissionDenied={() => setCameraDenied(true)}
           />
         ) : (
-          <View style={[styles.centered, { backgroundColor: colors.background, flex: 1, paddingTop: topInset }]}>
+          <View style={[styles.centered, { backgroundColor: colors.background, flex: 1, paddingTop: insets.top + 12 }]}>
             <View style={[styles.permIcon, { backgroundColor: colors.surface }]}>
               <Icon name="camera-outline" size={40} color={colors.accent} />
             </View>
@@ -255,8 +242,7 @@ function WebScannerScreen() {
         )}
       </View>
 
-      {/* Header — flows under status bar, BUTTON_BUFFER ensures buttons clear the top edge */}
-      <View style={[styles.nativeHeader, { paddingTop: HEADER_H + BUTTON_BUFFER }]}>
+      <View style={[styles.nativeHeader, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.nativeHeaderTitle}>Scan Card</Text>
         <View style={styles.headerRight}>
           <FilterIconButton count={filterCount} onPress={() => setShowFilters(true)} colors={colors} dark />
@@ -269,19 +255,15 @@ function WebScannerScreen() {
       </View>
 
       {filterCount > 0 && !cameraDenied && (
-        <View style={[styles.nativeFilterPills, { top: HEADER_H + BUTTON_BUFFER + 48 }]}>
+        <View style={[styles.nativeFilterPills, { top: insets.top + 60 }]}>
           <ActiveFilterPills filters={filters} colors={colors} dark onClear={(key) => setFilters(f => ({ ...f, [key]: null }))} />
         </View>
       )}
 
-      {/* Scan frame corners — absolutely positioned to calculated center */}
       {!cameraDenied && (
         <View
           pointerEvents="none"
-          style={[
-            styles.scanBox,
-            { top: frameTop, left: (SCREEN_W - FRAME_W) / 2 },
-          ]}
+          style={[styles.scanBox, { top: frameTop, left: (SCREEN_W - FRAME_W) / 2 }]}
         >
           <View style={[styles.corner, styles.cornerTL, { borderColor: colors.accent }]} />
           <View style={[styles.corner, styles.cornerTR, { borderColor: colors.accent }]} />
@@ -391,7 +373,9 @@ function NativeScannerScreen() {
       const photo = await (cameraRef.current as any).takePictureAsync({ quality: 0.9, base64: false });
       if (!photo?.uri) return;
       const frame = frameLayoutRef.current;
-      const uri = frame && photo.width && photo.height ? await cropToFrame(photo.uri, photo.width, photo.height, frame) : photo.uri;
+      const uri = frame && photo.width && photo.height
+        ? await cropToFrame(photo.uri, photo.width, photo.height, frame)
+        : photo.uri;
       await runIdentify(uri);
     } catch (err) {
       console.warn("[handleCapture] error:", err);
@@ -412,7 +396,7 @@ function NativeScannerScreen() {
 
   if (!permission.granted) {
     return (
-      <View style={[styles.centered, { backgroundColor: colors.background, paddingTop: insets.top }]}>
+      <View style={[styles.centered, { backgroundColor: colors.background, paddingTop: insets.top + 12 }]}>
         <View style={[styles.permIcon, { backgroundColor: colors.surface }]}>
           <Icon name="camera-outline" size={40} color={colors.accent} />
         </View>
@@ -433,7 +417,7 @@ function NativeScannerScreen() {
   const NativeCam = CameraView!;
 
   return (
-    <View style={[styles.container, { backgroundColor: "#000" }]}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <NativeCam ref={cameraRef as React.Ref<unknown>} style={StyleSheet.absoluteFill} facing="back" flash={flash} />
 
       {frameLayout && (
@@ -445,7 +429,7 @@ function NativeScannerScreen() {
         </View>
       )}
 
-      <View style={[styles.nativeHeader, { paddingTop: insets.top + 8 }]}>
+      <View style={[styles.nativeHeader, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.nativeHeaderTitle}>Scan Card</Text>
         <View style={styles.headerRight}>
           <FilterIconButton count={filterCount} onPress={() => setShowFilters(true)} colors={colors} dark />
@@ -463,7 +447,7 @@ function NativeScannerScreen() {
         </View>
       )}
 
-      <View style={[styles.frameOverlay, { marginTop: 0 }]} pointerEvents="none">
+      <View style={styles.frameOverlay} pointerEvents="none">
         <View style={styles.scanBox} onLayout={handleFrameLayout}>
           <View style={[styles.corner, styles.cornerTL, { borderColor: colors.accent }]} />
           <View style={[styles.corner, styles.cornerTR, { borderColor: colors.accent }]} />
@@ -486,12 +470,15 @@ function NativeScannerScreen() {
         >
           <View style={[styles.nativeCaptureRing, { borderColor: colors.accent }]}>
             <View style={[styles.nativeCaptureCore, { backgroundColor: colors.accent }]}>
-              {scanState === "scanning" ? <ActivityIndicator color={colors.background} size="small" /> : <Icon name="scan" size={26} color={colors.background} />}
+              {scanState === "scanning"
+                ? <ActivityIndicator color={colors.background} size="small" />
+                : <Icon name="scan" size={26} color={colors.background} />
+              }
             </View>
           </View>
         </Pressable>
         <Pressable style={styles.nativeUpload} onPress={() => setFlash(f => f === "off" ? "on" : "off")}>
-          <Icon name={flash === "on" ? "flash" : "flash-off"} size={22} color={flash === "on" ? colors.accent : "rgba(255,255,255,0.7)"} />
+          <Icon name={flash === "on" ? "flash" : "flash-outline"} size={22} color="rgba(255,255,255,0.7)" />
         </Pressable>
       </View>
 
@@ -503,7 +490,7 @@ function NativeScannerScreen() {
   );
 }
 
-export default function ScannerScreen() {
+export default function ScanScreen() {
   if (Platform.OS === "web") return <WebScannerScreen />;
   return <NativeScannerScreen />;
 }
@@ -512,38 +499,43 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16, paddingHorizontal: 32 },
   headerRight: { flexDirection: "row", alignItems: "center", gap: 10 },
-  listDot: { width: 8, height: 8, borderRadius: 4 },
-  dimRegion: { position: "absolute", backgroundColor: "rgba(0,0,0,0.55)" },
   nativeHeader: {
-    position: "absolute", top: 0, left: 0, right: 0,
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 20, paddingBottom: 12, zIndex: 10,
+    paddingHorizontal: 20, paddingBottom: 12,
   },
-  nativeHeaderTitle: { color: "#fff", fontSize: 22, fontFamily: "Poppins_700Bold" },
+  nativeHeaderTitle: { color: "#fff", fontSize: 26, fontFamily: "Poppins_700Bold" },
   listBadgeDark: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.12)" },
   listBadgeDarkText: { color: "rgba(255,255,255,0.9)", fontSize: 12, fontFamily: "Poppins_600SemiBold" },
+  listDot: { width: 8, height: 8, borderRadius: 4 },
   frameOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", gap: 20, pointerEvents: "none" as "none" },
   scanBox: { width: FRAME_W, height: FRAME_H, position: "relative" },
   hintRow: { position: "absolute", left: 0, right: 0, alignItems: "center" },
-  nativeHint: { color: "rgba(255,255,255,0.85)", fontSize: 13, fontFamily: "Poppins_400Regular", textAlign: "center", paddingHorizontal: 40 },
+  nativeHint: { color: "rgba(255,255,255,0.75)", fontSize: 13, fontFamily: "Poppins_400Regular", textAlign: "center" },
   corner: { position: "absolute", width: 28, height: 28, borderWidth: 3 },
-  cornerTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 8 },
-  cornerTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 8 },
-  cornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 8 },
-  cornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 8 },
+  cornerTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0 },
+  cornerTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0 },
+  cornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0 },
+  cornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0 },
   nativeBottom: { position: "absolute", bottom: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingHorizontal: 40 },
   nativeUpload: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
   nativeCapture: { alignItems: "center", justifyContent: "center" },
   nativeCaptureRing: { width: 80, height: 80, borderRadius: 40, borderWidth: 3, alignItems: "center", justifyContent: "center" },
   nativeCaptureCore: { width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center" },
-  permIcon: { width: 80, height: 80, borderRadius: 40, alignItems: "center", justifyContent: "center", marginBottom: 8 },
+  nativeFilterPills: { position: "absolute", left: 0, right: 0, alignItems: "center" },
+  dimRegion: { position: "absolute", backgroundColor: "rgba(0,0,0,0.55)" },
+  permIcon: { width: 80, height: 80, borderRadius: 40, alignItems: "center", justifyContent: "center" },
   permTitle: { fontSize: 20, fontFamily: "Poppins_700Bold", textAlign: "center" },
   permSub: { fontSize: 14, fontFamily: "Poppins_400Regular", textAlign: "center", lineHeight: 22 },
-  permBtn: { paddingHorizontal: 32, paddingVertical: 14, borderRadius: 14, marginTop: 8 },
-  permBtnText: { fontSize: 16, fontFamily: "Poppins_600SemiBold" },
-  uploadLink: { marginTop: 12, padding: 8 },
-  uploadLinkText: { fontSize: 14, fontFamily: "Poppins_400Regular", textDecorationLine: "underline" },
-  nativeFilterPills: { position: "absolute", left: 0, right: 0, zIndex: 9, paddingHorizontal: 20 },
+  permBtn: { paddingHorizontal: 32, paddingVertical: 14, borderRadius: 14 },
+  permBtnText: { fontSize: 15, fontFamily: "Poppins_600SemiBold" },
+  uploadLink: { paddingVertical: 12 },
+  uploadLinkText: { fontSize: 13, fontFamily: "Poppins_400Regular", textDecorationLine: "underline" },
+});
+
+const fStyles = StyleSheet.create({
+  btn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  badge: { position: "absolute", top: -2, right: -2, width: 14, height: 14, borderRadius: 7, alignItems: "center", justifyContent: "center" },
+  badgeText: { fontSize: 8, fontFamily: "Poppins_700Bold" },
 });
 
 const ddStyles = StyleSheet.create({
@@ -551,18 +543,12 @@ const ddStyles = StyleSheet.create({
   menu: { width: "100%", borderRadius: 18, borderWidth: 1, paddingVertical: 8, overflow: "hidden" },
   menuTitle: { fontSize: 10, fontFamily: "Poppins_500Medium", textTransform: "uppercase", letterSpacing: 1, paddingHorizontal: 18, paddingVertical: 10 },
   item: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 18, paddingVertical: 14 },
-  dot: { width: 10, height: 10, borderRadius: 5 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
   itemText: { flex: 1, fontSize: 15, fontFamily: "Poppins_500Medium" },
 });
 
-const fStyles = StyleSheet.create({
-  btn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  badge: { position: "absolute", top: -2, right: -2, minWidth: 16, height: 16, borderRadius: 8, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 },
-  badgeText: { fontSize: 10, fontFamily: "Poppins_700Bold", lineHeight: 14 },
-});
-
 const pillStyles = StyleSheet.create({
-  row: { flexDirection: "row", flexWrap: "wrap", gap: 6, paddingHorizontal: 20, paddingBottom: 12 },
-  pill: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14 },
+  row: { flexDirection: "row", flexWrap: "wrap", gap: 6, justifyContent: "center" },
+  pill: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
   pillText: { fontSize: 12, fontFamily: "Poppins_500Medium" },
 });
