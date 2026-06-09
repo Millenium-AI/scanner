@@ -1,5 +1,18 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { Platform } from "react-native";
+
+// Web-safe storage: localStorage on web, AsyncStorage on native
+const Storage = {
+  getItem: (key: string): Promise<string | null> =>
+    Platform.OS === "web"
+      ? Promise.resolve(localStorage.getItem(key))
+      : AsyncStorage.getItem(key),
+  setItem: (key: string, value: string): Promise<void> =>
+    Platform.OS === "web"
+      ? Promise.resolve(void localStorage.setItem(key, value))
+      : AsyncStorage.setItem(key, value),
+};
 
 export interface CardScanResult {
   cardId: string;
@@ -82,9 +95,9 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     const loadData = async () => {
       try {
         const [scansData, listsData, collectionData] = await Promise.all([
-          AsyncStorage.getItem(SCANS_KEY),
-          AsyncStorage.getItem(LISTS_KEY),
-          AsyncStorage.getItem(COLLECTION_KEY),
+          Storage.getItem(SCANS_KEY),
+          Storage.getItem(LISTS_KEY),
+          Storage.getItem(COLLECTION_KEY),
         ]);
         if (scansData) setScans(JSON.parse(scansData));
         if (listsData) {
@@ -98,15 +111,15 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const persistScans = useCallback(async (data: ScanItem[]) => {
-    await AsyncStorage.setItem(SCANS_KEY, JSON.stringify(data));
+    await Storage.setItem(SCANS_KEY, JSON.stringify(data));
   }, []);
 
   const persistLists = useCallback(async (data: ScanList[]) => {
-    await AsyncStorage.setItem(LISTS_KEY, JSON.stringify(data));
+    await Storage.setItem(LISTS_KEY, JSON.stringify(data));
   }, []);
 
   const persistCollection = useCallback(async (data: CollectionCard[]) => {
-    await AsyncStorage.setItem(COLLECTION_KEY, JSON.stringify(data));
+    await Storage.setItem(COLLECTION_KEY, JSON.stringify(data));
   }, []);
 
   const addScan = useCallback((card: CardScanResult, listId?: string) => {
@@ -199,7 +212,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
   }, [persistCollection]);
 
   const refreshCollectionPrices = useCallback(async () => {
-    const snapshot = await AsyncStorage.getItem(COLLECTION_KEY);
+    const snapshot = await Storage.getItem(COLLECTION_KEY);
     if (!snapshot) return;
     const current: CollectionCard[] = JSON.parse(snapshot);
     if (!current.length) return;
