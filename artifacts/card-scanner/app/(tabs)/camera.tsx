@@ -429,7 +429,6 @@ function NativeScannerScreen() {
       )}
 
       <View style={[styles.nativeHeader, { paddingTop: insets.top + 12 }]}>
-        <Text style={styles.nativeHeaderTitle}>Scan Card</Text>
         <View style={styles.headerRight}>
           <FilterIconButton count={filterCount} onPress={() => setShowFilters(true)} colors={colors} dark />
           <Pressable style={styles.listBadgeDark} onPress={() => setShowListDrop(true)}>
@@ -499,10 +498,9 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16, paddingHorizontal: 32 },
   headerRight: { flexDirection: "row", alignItems: "center", gap: 10 },
   nativeHeader: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    flexDirection: "row", alignItems: "center", justifyContent: "flex-end",
     paddingHorizontal: 20, paddingBottom: 12,
   },
-  nativeHeaderTitle: { color: "#fff", fontSize: 26, fontFamily: "Poppins_700Bold" },
   listBadgeDark: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.12)" },
   listBadgeDarkText: { color: "rgba(255,255,255,0.9)", fontSize: 12, fontFamily: "Poppins_600SemiBold" },
   listDot: { width: 8, height: 8, borderRadius: 4 },
